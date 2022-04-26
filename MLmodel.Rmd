@@ -1,0 +1,214 @@
+---
+title: "ML Model"
+author: "Tanya Grover"
+date: "4/21/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r library}
+library(tidyverse)
+library(lubridate)
+library(tidymodels)
+library(themis)
+library(rpart.plot)
+library(vip)
+library(parsnip)
+library(dials)
+library(ranger)
+```
+
+```{r library load data and recode variables}
+# load the data
+voting_data <- read_csv("CES20_Common_OUTPUT_vv.csv") %>%
+  mutate(age = birthyr - 2022) %>%
+  select(CC20_401, birthyr, gender, educ, race, CC20_332a, CC20_302, CC20_309e, CC20_350b, urbancity, ideo5, pew_religimp, ownhome,newsint, faminc_new, investor, internethome, sexuality, CC20_331e, gunown, child18, votereg, CC20_307, CC20_303, employ, marstat, immstat, union, phone, presvote16post, inputstate, dualcit, region, CC20_360, edloan, student, healthins_1, healthins_2, healthins_3, healthins_4, healthins_5, healthins_6)
+
+# create age variable, filter registered voters and drop missing values
+voting_data <- voting_data %>%
+  mutate(birthyr = 2020 - birthyr) %>%
+  filter(votereg == 1) %>%
+  na.omit()
+
+# recode internet at home to match implemtation data
+voting_data <- voting_data %>%
+  mutate(internethome = if_else(condition = internethome <= 2, true = 1,
+                                false = 2))
+
+# create a binary variable for voted or not and convert to factor
+voting_data <- voting_data %>% 
+    mutate(voted = if_else(condition = CC20_401 == 5, true = 1,
+                               false = 0))%>%
+  mutate(voted = factor(voted, labels = c("1", "0"), levels = c("1", "0")))
+
+# drop voter registration (since it is a prerequiste, not a predictor)
+voting_data <- voting_data %>% 
+  select(-votereg)
+```
+
+```{r - split data in testing and training}
+set.seed(201902)
+voting_split <- initial_split(data = voting_data, prop = 0.8, strata = voted)
+voting_train <- training(x = voting_split) 
+voting_test <- testing(x = voting_split)
+
+#use v-fold cross validation
+folds_voting <- vfold_cv(voting_train, v = 10)
+```
+
+```{r - create recipe and preprocessing}
+voting_rec <-
+  recipe(voted ~ ., data = voting_train) %>%
+  step_nzv(all_predictors()) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  themis::step_downsample(voted)
+```
+
+```{r decision tree with hyper parameter tuning: algorithm #1}
+
+# tune hyper parameters
+tree_tune_voting <-
+  decision_tree(
+    cost_complexity = tune(),
+    tree_depth = tune()
+  ) %>%
+  set_engine("rpart") %>%
+  set_mode("classification")
+
+# create a grid
+tree_grid_voting <- grid_regular(cost_complexity(),
+                                 tree_depth(),
+                                 levels = 5)
+
+# create workflow
+tree_wf_voting <- workflow() %>%
+  add_recipe(voting_rec) %>%
+  add_model(tree_tune_voting)
+
+# estimate model with resampling
+tree_res_voting <- tree_wf_voting %>%
+  tune_grid(
+    resamples = folds_voting,
+    grid = tree_grid_voting, metrics = metric_set(accuracy, roc_auc, precision))
+
+# view accuracy, roc and precision
+tree_res_voting %>%
+  collect_metrics(summarize = FALSE)
+
+# show model with highest precision
+tree_res_voting %>%
+  show_best(metric = "precision", n = 1)
+
+# select a single set of hyper parameters for the best decision tree
+best_tree_voting <- tree_res_voting %>%
+  select_best(metric = "precision")
+
+# finalize the model
+final_tree_wf_voting <- tree_wf_voting %>%
+  finalize_workflow(best_tree_voting)
+
+# last fit
+tree_final_fit_voting <- final_tree_wf_voting %>%
+  fit(data = voting_train)
+```
+
+
+```{r logistic regression: algorithm #2}
+# build a model
+logistic_mod_voting <-
+  logistic_reg() %>%
+  set_engine("glm")
+
+# create a workflow
+logistic_wf_voting <-
+  workflow() %>%
+  add_model(logistic_mod_voting) %>%
+  add_recipe(voting_rec)
+
+# use resampling
+logistic_res_voting <- 
+  logistic_wf_voting %>%
+  fit_resamples(folds_voting, metrics = metric_set(accuracy, roc_auc, precision))
+
+# view accuracy, roc and precision
+logistic_res_voting %>%
+  collect_metrics(summarize = FALSE)
+
+# show the model with the highest precision
+logistic_res_voting %>%
+  show_best(metric = "precision", n = 1)
+
+# select the best model
+best_logistic_voting <- logistic_res_voting %>%
+  select_best("precision")
+
+# finalize the workflow
+final_logistic_wf_voting <- logistic_wf_voting  %>%
+  finalize_workflow(best_logistic_voting)
+
+# fit the data
+logistic_fit_voting <-
+  final_logistic_wf_voting %>%
+  fit(data = voting_train)
+```
+
+
+```{r random forest: part 1}
+#create a model
+rf_mod_voting <-
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+#create a workflow
+rf_wf_voting <-
+  workflow() %>%
+  add_model(rf_mod_voting) %>%
+  add_recipe(voting_rec)
+
+#tune the model
+rf_fit_rs_voting <-
+  rf_wf_voting %>%
+  tune_grid(folds_voting, 
+            grid = 25,
+            control = control_grid(save_pred = TRUE),
+            metrics = metric_set(accuracy, roc_auc, precision))
+
+
+#view the accuracy, roc and precision
+rf_fit_rs_voting %>%
+  collect_metrics(summarize = FALSE)
+
+#show the best model
+rf_fit_rs_voting %>%
+  show_best(metric = "precision")
+
+#select the best model
+rf_best_voting <-
+  rf_fit_rs_voting %>%
+  select_best("precision")
+
+```
+```{r random forest: part 2}
+# the last model
+last_rf_mod_voting <-
+  rand_forest(mtry = 6, min = 14, trees = 1000) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("classification")
+
+# the last workflow
+last_rf_wf_voting <-
+  rf_wf_voting %>%
+  update_model(last_rf_mod_voting)
+
+# the last fit
+rf_last_fit <-
+  last_rf_wf_voting %>%
+  fit(data = voting_train)
+
+```
