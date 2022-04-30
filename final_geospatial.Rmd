@@ -1,0 +1,378 @@
+---
+title: "Geospatial Analysis - Final Project"
+author: "Payal Soneja"
+output:
+  html_document: 
+    df_print: paged
+  pdf_document:
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r include = FALSE}
+def.chunk.hook  <- knitr::knit_hooks$get("chunk")
+knitr::knit_hooks$set(chunk = function(x, options) {
+  x <- def.chunk.hook(x, options)
+  ifelse(options$size != "normalsize", paste0("\n \\", options$size,"\n\n", x, "\n\n \\normalsize"), x)
+})
+
+```
+
+## R Markdown
+
+```{r library}
+packages <- c("tidyverse", "readr","dials", "ranger", "parsnip","lubridate",
+              "leaflet", "sf", "tigris", "arcos",
+              "sp", "rmapshaper")
+if (length(setdiff(packages, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packages, rownames(installed.packages())), repos = "https://cran.us.r-project.org")  
+}
+
+library(tidyverse)
+library(lubridate)
+library(ggiraph) # to use geom_sf_interactive
+library(tigris)
+library(sf)
+library(leaflet)
+library(patchwork)
+
+```
+
+```{r library load data and recode variables}
+# load the data
+voting_data <- read_csv("CES20_Common_OUTPUT_vv.csv") %>%
+  select(CC20_401, birthyr, gender, educ, race, CC20_332a, CC20_302, CC20_309e, CC20_350b, urbancity, ideo5, pew_religimp, ownhome,newsint, faminc_new, investor, internethome, sexuality, CC20_331e, gunown, child18, votereg, CC20_307, inputstate, countyfips, countyname)
+
+# create age variable, filter registered voters and drop missing values
+voting_data <- voting_data %>%
+  mutate(birthyr = 2020 - birthyr) %>%
+  filter(votereg == 1) %>%
+  na.omit()
+
+# recode internet at home to match implemtation data
+voting_data <- voting_data %>%
+  mutate(internethome = if_else(condition = internethome <= 2, true = 1,
+                                false = 2))
+
+# create a binary variable for voted or not and convert to factor
+voting_data <- voting_data %>% 
+    mutate(voted = if_else(condition = CC20_401 == 5, true = 1,
+                               false = 0))%>%
+  mutate(voted = factor(voted, labels = c("1", "0"), levels = c("1", "0")))
+
+# drop voter registration (since it is a prerequiste, not a predictor)
+voting_data <- voting_data %>% 
+  select(-votereg)
+```
+
+```{r, results = "hide"}
+# calculate voter turnout percentage at the county level
+voter_turnout_county <- voting_data %>%
+  mutate(voted = ifelse(as.numeric(voted) == 1,1,0)) %>%
+  group_by(countyfips, countyname) %>%
+  summarise(voter_count_perc = mean(voted))
+```
+
+``` {r, results = "hide"}
+# download county shape files from tigris package
+counties_sf <- counties(cb=TRUE)
+
+# download state shape files from tigris package
+states_sf <- states(cb=TRUE)
+
+```
+
+```{r, }
+# join the voter turnout data with county shagpe files from tigris package
+counties_voter_count <- geo_join(counties_sf, voter_turnout_county, "GEOID", "countyfips") 
+# remove rows with "NULL" voter turnout data
+counties_voter_count <- subset(counties_voter_count, !is.na(voter_count_perc))
+```
+
+### Voter Turnout by County
+
+```{r}
+# map the values of voter_count_perc to color palette 
+pal <- colorNumeric("Blues", domain = counties_voter_count$voter_count_perc)
+
+# set up the tootltip
+popup_sb <- paste0(counties_voter_count$NAME, ", ", counties_voter_count$STATE_NAME, "</br/> Voted Count %: \n", as.character(counties_voter_count$voter_count_perc*100))
+
+# map voter_count_perc with the new tiles CartoDB.Positron
+leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  setView(-98.483330, 38.712046, zoom = 4) %>% 
+  addPolygons(data = counties_voter_count , 
+              fillColor = ~pal(counties_voter_count$voter_count_perc), 
+              fillOpacity = 1, 
+              weight = 0.9, 
+              smoothFactor = 0.5, 
+              stroke=TRUE,
+              color="white",
+              popup = ~popup_sb) %>%
+  addLegend(pal = pal, 
+            values = counties_voter_count$voter_count_perc, 
+            labFormat = labelFormat(suffix = '%', between = '% - ',
+                                                 transform = function(x) 100 * x),
+            position = "bottomright", 
+            title = "Voter Count %")
+```
+
+
+### Voter Turnout by State
+
+``` {r}
+voter_turnout_state <- voting_data %>%
+  mutate(voted = ifelse(as.numeric(voted) == 1,1,0)) %>%
+  mutate(statefips=sprintf("%02d", inputstate)) %>%
+  group_by(statefips) %>%
+  summarise(voter_count_perc = mean(voted))
+
+states_voter_count <- geo_join(states_sf, voter_turnout_state, "GEOID", "statefips")
+states_voter_count <- subset(states_voter_count, !is.na(voter_count_perc))
+
+
+pal <- colorNumeric("Blues", domain =states_voter_count$voter_count_perc)
+
+# Setting up the popup text
+popup_sb <- paste0(states_voter_count$NAME, "</br/> Voted Count %: \n", as.character(states_voter_count$voter_count_perc*100))
+
+# Mapping it with the new tiles CartoDB.Positron
+leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  setView(-98.483330, 38.712046, zoom = 4) %>% 
+  addPolygons(data = states_voter_count , 
+              fillColor = ~pal(states_voter_count$voter_count_perc), 
+              fillOpacity = 0.7, 
+              weight = 0.2, 
+              smoothFactor = 0.2, 
+              popup = ~popup_sb) %>%
+  addLegend(pal = pal, 
+            values = states_voter_count$voter_count_perc, 
+            labFormat = labelFormat(suffix = '%', between = '% - ',
+                                                 transform = function(x) 100 * x),
+            position = "bottomright", 
+            title = "Voter Count %")
+
+```
+
+
+### Conservative Ideology by State
+
+```{r}
+cons_perc_state <- voting_data %>%
+  mutate(conservative = ifelse(ideo5 %in% c(4,5),1,0)) %>%
+  mutate(statefips=sprintf("%02d", inputstate)) %>%
+  group_by(statefips) %>%
+  summarise(cons_count_perc = mean(conservative))
+
+states_cons_perc <- geo_join(states_sf, cons_perc_state, "GEOID", "statefips")
+states_cons_perc <- subset(states_cons_perc, !is.na(cons_count_perc))
+
+
+pal <- colorNumeric("Reds", domain =states_voter_count$cons_count_perc)
+
+# Setting up the popup text
+popup_sb <- paste0(states_cons_perc$NAME, "</br/> Conservative %: \n", as.character(states_cons_perc$cons_count_perc*100))
+
+# Mapping it with the new tiles CartoDB.Positron
+leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  setView(-98.483330, 38.712046, zoom = 4) %>% 
+  addPolygons(data = states_cons_perc , 
+              fillColor = ~pal(states_cons_perc$cons_count_perc), 
+              fillOpacity = 0.7, 
+              weight = 0.2, 
+              smoothFactor = 0.2, 
+              popup = ~popup_sb) %>%
+  addLegend(pal = pal, 
+            values = states_cons_perc$cons_count_perc, 
+            labFormat = labelFormat(suffix = '%', between = '% - ',
+                                                 transform = function(x) 100 * x),
+            position = "bottomleft", 
+            title = "Conservative Respondents %")
+
+```
+
+### Conservative Ideology by County
+
+```{r}
+cons_perc_county <- voting_data %>%
+  mutate(conservative = ifelse(ideo5 %in% c(4,5),1,0)) %>%
+  group_by(countyfips) %>%
+  summarise(cons_count_perc = mean(conservative))
+
+counties_cons_perc <- geo_join(counties_sf, cons_perc_county, "GEOID", "countyfips")
+counties_cons_perc <- subset(counties_cons_perc, !is.na(cons_count_perc))
+
+
+pal <- colorNumeric("Reds", domain =counties_voter_count$cons_count_perc)
+
+# Setting up the popup text
+popup_sb <- paste0(counties_cons_perc$NAME, ", ", counties_cons_perc$STATE_NAME, "</br/> Conservative %: \n", as.character(counties_cons_perc$cons_count_perc*100))
+
+# Mapping it with the new tiles CartoDB.Positron
+leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  setView(-98.483330, 38.712046, zoom = 4) %>% 
+  addPolygons(data = counties_cons_perc , 
+              fillColor = ~pal(counties_cons_perc$cons_count_perc), 
+              fillOpacity = 0.7, 
+              weight = 0.2, 
+              smoothFactor = 0.2, 
+              popup = ~popup_sb) %>%
+  addLegend(pal = pal, 
+            values = counties_cons_perc$cons_count_perc, 
+            labFormat = labelFormat(suffix = '%', between = '% - ',
+                                                 transform = function(x) 100 * x),
+            position = "bottomleft", 
+            title = "Conservative Respondents %")
+```
+
+
+### Gun Ownership by State
+
+``` {r}
+gun_perc_state <- voting_data %>%
+  mutate(gunownership = ifelse(gunown %in% c(1,2),1,0)) %>%
+  mutate(statefips=sprintf("%02d", inputstate)) %>%
+  group_by(statefips) %>%
+  summarise(gun_count_perc = mean(gunownership))
+
+states_gun_perc <- geo_join(states_sf, gun_perc_state, "GEOID", "statefips")
+states_gun_perc <- subset(states_gun_perc, !is.na(gun_count_perc))
+
+pal <- colorNumeric("YlOrRd", domain =states_voter_count$gun_count_perc)
+
+# Setting up the popup text
+popup_sb <- paste0(states_gun_perc$NAME, "</br/> Gun Ownership %: \n", as.character(states_gun_perc$gun_count_perc*100))
+
+# Mapping it with the new tiles CartoDB.Positron
+leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  setView(-98.483330, 38.712046, zoom = 4) %>% 
+  addPolygons(data = states_gun_perc , 
+              fillColor = ~pal(states_gun_perc$gun_count_perc), 
+              fillOpacity = 0.7, 
+              weight = 0.2, 
+              smoothFactor = 0.2, 
+              popup = ~popup_sb) %>%
+  addLegend(pal = pal, 
+            values = states_gun_perc$gun_count_perc, 
+            labFormat = labelFormat(suffix = '%', between = '% - ',
+                                                 transform = function(x) 100 * x),
+            position = "bottomleft", 
+            title = "Gun Ownership %")
+```
+
+### Gun Ownership by County
+
+```{r}
+  gun_perc_county <- voting_data %>%
+    mutate(gunownership = ifelse(gunown %in% c(1,2),1,0)) %>%
+    group_by(countyfips) %>%
+    summarise(gun_count_perc = mean(gunownership))
+  
+  counties_gun_perc <- geo_join(counties_sf, gun_perc_county, "GEOID", "countyfips")
+  counties_gun_perc <- subset(counties_gun_perc, !is.na(gun_count_perc))
+
+
+pal <- colorNumeric("YlOrRd", domain =counties_voter_count$gun_count_perc)
+
+# Setting up the popup text
+popup_sb <- paste0(counties_gun_perc$NAME, ", ", counties_gun_perc$STATE_NAME, "</br/> Gun ownership %: \n", as.character(counties_gun_perc$gun_count_perc*100))
+
+# Mapping it with the new tiles CartoDB.Positron
+leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  setView(-98.483330, 38.712046, zoom = 4) %>% 
+  addPolygons(data = counties_gun_perc , 
+              fillColor = ~pal(counties_gun_perc$gun_count_perc), 
+              fillOpacity = 0.7, 
+              weight = 0.2, 
+              smoothFactor = 0.2, 
+              popup = ~popup_sb) %>%
+  addLegend(pal = pal, 
+            values = counties_gun_perc$gun_count_perc, 
+            labFormat = labelFormat(suffix = '%', between = '% - ',
+                                                 transform = function(x) 100 * x),
+            position = "bottomleft", 
+            title = "Gun Ownership %")
+```
+
+```{r}
+
+states_gun_perc %>%
+  slice_max(gun_count_perc) ## West Virginia has the highest percentage of respondents with gun ownership
+
+states_gun_perc %>%
+  slice_min(gun_count_perc) ## District of Columbia has the lowest percentage of respondents with gun ownership
+
+```
+
+```{r choropleth-g}
+
+police_unsafe_county <- voting_data %>%
+    mutate(police_unsafe = ifelse(CC20_307 %in% c(3,4),1,0)) %>%
+    group_by(countyfips) %>%
+    summarise(police_unsafe_perc = mean(police_unsafe))
+  x`
+  counties_police_unsafe_perc <- geo_join(counties_sf, police_unsafe_county , "GEOID", "countyfips")
+  counties_police_unsafe_perc <- subset(counties_police_unsafe_perc, !is.na(police_unsafe_perc))
+
+wv_police_unsafe_perc <- counties_police_unsafe_perc %>%
+  filter(STATEFP == "54")
+
+ma_police_unsafe_perc <- counties_police_unsafe_perc %>%
+  filter(STATEFP == "25")
+```
+
+```{r}
+
+wv_police_unsafe_perc$tooltip <- paste0(wv_police_unsafe_perc$NAME,
+                                 ": ",
+                                 round(wv_police_unsafe_perc$police_unsafe_perc*100, 2), '%')
+
+wv_police_unsafe_perc_plot <- ggplot() +
+  geom_sf_interactive(data = wv_police_unsafe_perc, color = "white", aes(fill = police_unsafe_perc, 
+                      tooltip = tooltip, data_id = GEOID), size = 0.5) +
+  labs(title = "Percentage of Respondents that said police makes them feel unsafe",
+       subtitle = "In West Virginia",
+       caption = "Source: Harvard CEES Data",
+       fill = "Percentage of responsents") +
+  theme(legend.position = "right") +
+   scale_fill_gradient(low = "#56B1F7", high = "#132B43", labels = scales::percent, limits = c(0,1)) +
+  theme_void()
+
+wv_police_unsafe_perc_plot <- girafe(ggobj = wv_police_unsafe_perc_plot) %>%
+  girafe_options(opts_hover(css = "fill:cyan;"), 
+                 opts_zoom(max = 10))
+
+wv_police_unsafe_perc_plot
+
+ma_police_unsafe_perc$tooltip <- paste0(ma_police_unsafe_perc$NAME,
+                                 ": ",
+                                 round(ma_police_unsafe_perc$police_unsafe_perc*100, 2), '%')
+
+ma_police_unsafe_perc_plot <- ggplot() +
+  geom_sf_interactive(data = ma_police_unsafe_perc, color = "white", aes(fill = police_unsafe_perc, 
+                      tooltip = tooltip, data_id = GEOID), size = 0.5) +
+  labs(title = "Percentage of Respondents that said police makes them feel unsafe",
+       subtitle = "In Massachusets",
+       caption = "Source: Harvard CEES Data",
+       fill = "Percentage of responsents") +
+  theme(legend.position = "right") +
+   scale_fill_gradient(low = "#56B1F7", high = "#132B43", labels = scales::percent, limits = c(0,1)) +
+  theme_void()
+  
+ma_police_unsafe_perc_plot <- girafe(ggobj = ma_police_unsafe_perc_plot) %>%
+  girafe_options(opts_hover(css = "fill:cyan;"), 
+                 opts_zoom(max = 10))
+
+ma_police_unsafe_perc_plot 
+
+```
