@@ -4,9 +4,9 @@
 URL of the repository: https://github.com/tg484/Data-Science-Final-Project
 
 **Authors:**<br/>
-Priyasha Chawla
-Tanya Grover
-Deepika Nagesh
+Priyasha Chawla<br/>
+Tanya Grover<br/>
+Deepika Nagesh<br/>
 Payal Soneja - [GitHub Profile](https://github.com/payalsoneja)<br/>
 
 #### About Project
