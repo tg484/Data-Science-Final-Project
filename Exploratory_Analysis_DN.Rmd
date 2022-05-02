@@ -1,0 +1,299 @@
+---
+title: "FinalProj_Exploratory Analysis"
+author: "Deepika Nagesh"
+date: "4/24/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(patchwork)
+
+```
+
+```{r cleaning}
+# load the data
+voting_data <- read_csv("Data/CES20_Common_OUTPUT_vv.csv") %>%
+  select(CC20_401, birthyr, gender, educ, race, CC20_332a, CC20_302, CC20_309e, CC20_350b, urbancity, ideo5, pew_religimp, ownhome,newsint, faminc_new, investor, internethome, sexuality, CC20_331e, gunown, child18, votereg, presvote16post, CC20_303, CC20_307, employ, marstat, immstat, phone, CC20_300_1,CC20_300_2, CC20_300_3, CC20_300_4, CC20_300_5, CC20_300a, CC20_300c , CC20_320d, CC20_320b, race, inputstate, CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7)
+
+#healthins not found
+
+# create age variable, filter registered voters and drop missing values
+voting_data <- voting_data %>%
+  mutate(birthyr = 2020 - birthyr) %>%
+  filter(votereg == 1) %>%
+  na.omit()
+
+# recode internet at home to match implementation data
+voting_data <- voting_data %>%
+  mutate(internethome = if_else(condition = internethome <= 2, true = 1,
+                                false = 2))
+
+# create a binary variable for voted or not and convert to factor
+voting_data <- voting_data %>% 
+    mutate(voted = if_else(condition = CC20_401 == 5, true = 1,
+                               false = 0))%>%
+  mutate(voted = factor(voted, labels = c("1", "0"), levels = c("1", "0")))
+
+# drop voter registration (since it is a prerequiste, not a predictor)
+voting_data <- voting_data %>% 
+  select(-votereg)
+
+# renaming variables
+
+## cc20_332a - Always allow a woman to obtain an abortion as a matter of choice: 1 = Support, 2 = Oppose
+## cc20_302 - opinion about the economy 
+## cc20_309e - how is your health
+## cc20_350b -  Raise the minimum wage to $15 an hour. - 1 - favour 2 = oppose 
+## cc20_331e - Increase spending on border security by $25 billion, including building a wall between the U.S. and Mexico.  
+
+
+```
+
+
+
+## Plot 1: Percentage voted by gender
+50-50 split among males and females among those who voted
+
+
+DN - I'm sure we would want to show this differently, or maybe just show it as a tibble for sample make up instead of a graph
+``` {r Plot1}
+
+voting_data %>%
+  filter(voted == 1) %>%
+  group_by(voted = as.factor(voted), gender = as.factor(gender)) %>%
+  summarise(count = n())%>%
+  mutate(frequency = count/sum(count)) %>%
+  ggplot(aes (x = gender, y = frequency)) +
+  geom_col(stat = "identity", width = 0.7, position = "dodge") +
+  #geom_bar(width = 0.9, stat="identity", position = 'dodge') +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0,1)) + 
+  labs(title = "Percentage voted by gender",
+    caption ="Source: Cooperative Election Study Common Content, 2020",
+    x = "Gender", y = "Percentage of respondents") +
+  scale_x_discrete(labels = c("Male", "Female"))
+
+```
+
+
+
+## Plot 2: Gun Ownership by Location
+
+Rural areas have more people owning guns than in other types 
+
+
+
+
+## Plot 3: Gun Ownership by Voting
+
+Higher proportion of gun ownership by the respondent among people who have voted
+
+
+
+DN - Plot 3 seems more relevant 
+``` {r Plot2&3}
+
+#Plot 2
+#Gun ownership by urban/rural
+
+voting_data %>%
+  mutate(urbancity = case_when(urbancity == 1 ~ "City",
+                               urbancity == 2 ~ "Suburb",
+                               urbancity == 3 ~ "Town",
+                               urbancity == 4 ~ "Rural Area",
+                               urbancity == 5 ~ "Other")) %>%
+  group_by(urbancity, gun = as.factor(gunown)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = count/sum(count)) %>%
+  ggplot(aes(x = urbancity, y = frequency , fill = gun)) +
+  geom_bar(stat = "identity") + 
+  scale_y_continuous(expand = c(0,0)) +
+  geom_text(aes(label = round(frequency, digits = 2)), size = 3, 
+            position = position_stack(vjust = 0.5)) + 
+  scale_fill_discrete(labels = c("Personally own a gun", "Not Personally, but owned in HH", "No one in HH", "Not sure")) +
+  labs (title = "Gun Ownership by Type of Area",
+        x = "Type of Area",
+        y = "Proportion of Individuals",
+        fill = "Gun Ownership",
+        caption = "n = 12688")
+
+#Plot 3
+
+#Gun ownership by voted/not voted
+voting_data %>%
+  mutate(urbancity = case_when(urbancity == 1 ~ "City",
+                               urbancity == 2 ~ "Suburb",
+                               urbancity == 3 ~ "Town",
+                               urbancity == 4 ~ "Rural Area",
+                               urbancity == 5 ~ "Other")) %>%
+  group_by(voted = as.factor(voted), gun = as.factor(gunown)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = count/sum(count)) %>%
+  ggplot(aes(x = voted, y = frequency , fill = gun)) +
+  geom_bar(stat = "identity") + 
+  scale_y_continuous(expand = c(0,0)) +
+  geom_text(aes(label = round(frequency, digits = 2)), size = 3, 
+            position = position_stack(vjust = 0.5)) + 
+  scale_fill_discrete(labels = c("Personally own a gun", "Not Personally, but owned in HH", "No one in HH", "Not sure")) +
+  labs (title = "Gun Ownership by Voted",
+        x = "Voted",
+        y = "Proportion of Individuals",
+        fill = "Gun Ownership",
+        caption = "n = 12688")
+
+```
+
+
+
+## Plot 4:Home Ownership by Voted/Not Voted 
+
+Among those who voted, 3/4th own a home
+There is a higher proportion of people who rent among those who haven't voted
+
+``` {r Plot4}
+#Home Ownership by Voted/Not Voted 
+
+voting_data %>%
+ # mutate(urbancity = case_when(urbancity == 1 ~ "City",
+  #                             urbancity == 2 ~ "Suburb",
+   #                            urbancity == 3 ~ "Town",
+    #                           urbancity == 4 ~ "Rural Area",
+     #                          urbancity == 5 ~ "Other")) %>%
+  group_by( voted = as.factor(voted), ownhome = as.factor(ownhome)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = count/sum(count)) %>%
+  ggplot(aes(x = voted, y = frequency , fill = ownhome)) +
+  geom_col(stat = "identity", width = 0.7, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.7),
+            vjust = -0.5, size = 3) +
+  scale_fill_discrete(labels = c("Own", "Rent", "Other")) +
+  scale_x_discrete(labels = c("Did Not Vote", "Voted")) +
+  labs (title = "Home Ownership by Voted/Not Voted in 2020 Election",
+        x = "Voted in 2020 Election",
+        y = "Proportion of Individuals",
+        fill = "Home Ownership",
+        caption = "n = 12688") +
+  theme_minimal()
+
+```
+
+
+
+## Plot 5&6: Income Distribution Differences among Voted/Not Voted
+
+Income distribution among those who have not voted is more right skewed (more people from lower income groups)
+While those who have voted are evenly spread across the distribution 
+
+
+
+DN - can speak about the average salary among these people considering the midpoint of the range while calculating it and then also showing the graph
+DN - need to fix axes labels
+``` {r Plot5&6}
+
+## How is the income distribution among those who voted and those who didn't
+
+# Plot 5
+income_by_voted <- voting_data %>%
+  filter(voted == 1) %>%
+  filter(faminc_new != 97) %>%
+  group_by(faminc_new = as.factor(faminc_new)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = count/sum(count)) %>%
+  ggplot() +
+  geom_col(aes(x = faminc_new, y = frequency)) +
+  geom_text(aes(x = faminc_new, y = frequency, label = round(frequency, digits = 2)), position = position_dodge(0.7),
+            vjust = -0.5, size = 3) + 
+  #scale_fill_discrete(labels = c("Voted", "Did not Vote")) +
+  #scale_x_discrete(str_wrap(string = faminc_new, width = 10)) +
+  scale_x_discrete(labels = str_wrap(c("Less than $10,000","$10,000 - $19,999","$20,000 - $29,999","$30,000 - $39,999","$40,000 - $49,999","$50,000 - $59,999","$60,000 - $69,999","$70,000 - $79,999","$80,000 - $99,999","$100,000 - $119,999","$120,000 - $149,999","$150,000 - $199,999","$200,000 - $249,999","$250,000 - $349,999","$350,000 - $499,999","$500,000 or more"), width = 7)) +
+  labs (title = str_wrap("Income Distribution Among Individuals Who Voted", width = 20),
+        x = "Income Distribution",
+        y = "Proportion of Individuals",
+        caption = "n = 11293") +
+  theme_minimal()
+
+#Plot 6
+income_by_notvoted <- voting_data %>%
+  filter(voted == 0) %>%
+  filter(faminc_new != 97) %>%
+  group_by(faminc_new = as.factor(faminc_new)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = count/sum(count)) %>%
+  ggplot() +
+  geom_col(aes(x = faminc_new, y = frequency)) +
+  geom_text(aes(x = faminc_new, y = frequency, label = round(frequency, digits = 2)), position = position_dodge(0.7),
+            vjust = -0.5, size = 3) + 
+  #scale_fill_discrete(labels = c("Voted", "Did not Vote")) +
+  #scale_x_discrete(str_wrap(string = faminc_new, width = 10)) +
+  scale_x_discrete(labels = str_wrap(c("Less than $10,000","$10,000 - $19,999","$20,000 - $29,999","$30,000 - $39,999","$40,000 - $49,999","$50,000 - $59,999","$60,000 - $69,999","$70,000 - $79,999","$80,000 - $99,999","$100,000 - $119,999","$120,000 - $149,999","$150,000 - $199,999","$200,000 - $249,999","$250,000 - $349,999","$350,000 - $499,999","$500,000 or more"), width = 7)) +
+  labs (title = str_wrap("Income Distribution Among Individuals Who Did Not Voted", width = 20),
+        x = "Income Distribution",
+        y = "Proportion of Individuals",
+        caption = "n = 256") +
+  theme_minimal()
+
+
+income_by_voted + income_by_notvoted
+
+```
+
+## Plot 6: Participating in political activity
+
+Those that have voted are more likely to participate in political activity
+
+
+
+DN - I think these are good plots to show, but since this was a multiple choice question, each choice is a different var. Currently used patchwork for the three different graphs (can add 3 more) - can discuss what to do about this
+
+``` {r Plot6}
+## Taking part in a political activity 
+voting_data %>%
+  mutate(political_meetings = if_else(CC20_430a_1 == 2, 0, 1),
+         political_sign = if_else(CC20_430a_2 == 2, 0, 1),
+         work_campaign = if_else(CC20_430a_3 == 2, 0, 1),
+         political_protest = if_else(CC20_430a_4 == 2, 0, 1),
+         contact_public_official = if_else(CC20_430a_5 == 2, 0, 1),
+         donate_money = if_else(CC20_430a_6 == 2, 0, 1),
+         donate_blood = if_else(CC20_430a_7 == 2, 0, 1)) %>%
+  group_by(voted) %>%
+  summarise(political_meetings = mean(political_meetings),
+            political_sign = mean(political_sign),
+            work_campaign = mean (work_campaign),
+            political_protest = mean(political_protest),
+            contact_public_official = mean(contact_public_official),
+            donate_money = mean(donate_money),
+            donate_blood = mean(donate_blood))
+
+plot_1 <- voting_data %>%
+  mutate(political_meetings = if_else(CC20_430a_1 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(political_meetings = mean(political_meetings)) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = political_meetings, fill = as.factor(voted))) +
+  guides(fill = "none")
+
+plot_2 <- voting_data %>%
+  mutate(political_sign = if_else(CC20_430a_2 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(political_sign = mean(political_sign)) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = political_sign, fill = as.factor(voted))) +
+  guides(fill = "none")
+
+plot_3 <- voting_data %>%
+  mutate(work_campaign = if_else(CC20_430a_3 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(work_campaign = mean (work_campaign)) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = work_campaign, fill = as.factor(voted)))
+
+plot_1 +plot_2 + plot_3
+
+```
+
+
+
