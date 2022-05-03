@@ -1,7 +1,7 @@
 ---
-title: "FinalProj_Exploratory Analysis"
+title: "Exploratory Analysis: Final Project"
 author: "Deepika Nagesh"
-date: "4/24/2022"
+date: "5/03/2022"
 output: html_document
 ---
 
@@ -18,14 +18,10 @@ library(patchwork)
 voting_data <- read_csv("Data/CES20_Common_OUTPUT_vv.csv") %>%
   select(CC20_401, birthyr, gender, educ, race, CC20_332a, CC20_302, CC20_309e, CC20_350b, urbancity, ideo5, pew_religimp, ownhome,newsint, faminc_new, investor, internethome, sexuality, CC20_331e, gunown, child18, votereg, presvote16post, CC20_303, CC20_307, employ, marstat, immstat, phone, CC20_300_1,CC20_300_2, CC20_300_3, CC20_300_4, CC20_300_5, CC20_300a, CC20_300c , CC20_320d, CC20_320b, race, inputstate, CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7)
 
-#healthins not found
-
 # create age variable, filter registered voters and drop missing values
 voting_data <- voting_data %>%
   mutate(birthyr = 2020 - birthyr) %>%
   filter(votereg == 1) 
-#%>%
-  #na.omit()
 
 # recode internet at home to match implementation data
 voting_data <- voting_data %>%
@@ -42,120 +38,70 @@ voting_data <- voting_data %>%
 voting_data <- voting_data %>% 
   select(-votereg)
 
-# renaming variables
-
-## cc20_332a - Always allow a woman to obtain an abortion as a matter of choice: 1 = Support, 2 = Oppose
-## cc20_302 - opinion about the economy 
-## cc20_309e - how is your health
-## cc20_350b -  Raise the minimum wage to $15 an hour. - 1 - favour 2 = oppose 
-## cc20_331e - Increase spending on border security by $25 billion, including building a wall between the U.S. and Mexico.  
-
-
 ```
 
+### Income Distribution by Voting Behaviour
 
+To try to understand the pattern of income distribution among the two groups: those who voted and those who didn't.
 
-## Plot 1: Percentage voted by gender
-50-50 split among males and females among those who voted
+The first graph below shows us the income distribution among the individuals who voted. From this we can see that individuals belong to median income levels, with a majority of the individuals concentrated in the central portion of the distribution. 
 
+``` {r Plot1, fig.width = 12}
 
-DN - I'm sure we would want to show this differently, or maybe just show it as a tibble for sample make up instead of a graph
-``` {r Plot1}
+## How is the income distribution among those who voted and those who didn't
 
-voting_data %>%
+#Plot 1
+income_by_voted <- voting_data %>%
+  select(voted,faminc_new) %>%
+  na.omit() %>%
   filter(voted == 1) %>%
-  group_by(voted = as.factor(voted), gender = as.factor(gender)) %>%
-  summarise(count = n())%>%
-  mutate(frequency = count/sum(count)) %>%
-  ggplot(aes (x = gender, y = frequency)) +
-  geom_col(stat = "identity", width = 0.7, position = "dodge") +
-  #geom_bar(width = 0.9, stat="identity", position = 'dodge') +
-  theme_minimal() +
-  scale_y_continuous(limits = c(0,1)) + 
-  labs(title = "Percentage voted by gender",
-    caption ="Source: Cooperative Election Study Common Content, 2020",
-    x = "Gender", y = "Percentage of respondents") +
-  scale_x_discrete(labels = c("Male", "Female"))
+  filter(faminc_new != 97) %>%
+  group_by(faminc_new = as.factor(faminc_new)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count)*100)) %>%
+  ggplot() +
+  geom_col(aes(x = faminc_new, y = frequency), fill = "lightskyblue") +
+  geom_text(aes(x = faminc_new, y = frequency, label = round(frequency, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) + 
+  scale_x_discrete(labels = str_wrap(c("Less than $10,000","$10,000 - $19,999","$20,000 - $29,999","$30,000 - $39,999","$40,000 - $49,999","$50,000 - $59,999","$60,000 - $69,999","$70,000 - $79,999","$80,000 - $99,999","$100,000 - $119,999","$120,000 - $149,999","$150,000 - $199,999","$200,000 - $249,999","$250,000 - $349,999","$350,000 - $499,999","$500,000 or more"), width = 7)) +
+  labs (title = str_wrap("Income Distribution Among Individuals Who Voted"),
+        x = "Income Distribution",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal()
 
+print(income_by_voted)
 ```
 
+In contrast to the income distribution among individuals who voted in 2020 election, the income distribution among those who did not vote is right skewed, with a majority of the individuals in the lower income category. This helps us understand the profile of those not voting, and signalling that lower income groups are likely not to vote in an election. 
 
-## Plot 2: Gun Ownership by Location
-
-Rural areas have more people owning guns than in other types 
-
-``` {r Plot2}
-
+``` {r Plot2, fig.width = 12}
 #Plot 2
-#Gun ownership by urban/rural
-voting_data %>%
-  select(urbancity, gunown)%>%
+income_by_notvoted <- voting_data %>%
+   select(voted,faminc_new) %>%
   na.omit() %>%
-  mutate(urbancity = case_when(urbancity == 1 ~ "City",
-                               urbancity == 2 ~ "Suburb",
-                               urbancity == 3 ~ "Town",
-                               urbancity == 4 ~ "Rural Area",
-                               urbancity == 5 ~ "Other")) %>%
-  group_by(urbancity, gun = as.factor(gunown)) %>%
+  filter(voted == 0) %>%
+  filter(faminc_new != 97) %>%
+  group_by(faminc_new = as.factor(faminc_new)) %>%
   summarise(count =  n()) %>%
-  mutate(frequency = (count/sum(count)*100 )) %>%
-  ggplot(aes(x = urbancity, y = (frequency) , fill = gun)) +
-  geom_bar(stat = "identity") + 
-  scale_y_continuous(expand = c(0,0)) +
-  geom_text(aes(label = round(frequency, digits = 2)), size = 3.5, 
-            position = position_stack(vjust = 0.5)) +
-  #scale_fill_discrete()) +
-  labs (title = "Gun Ownership by Type of Area",
-        x = "Type of Area",
+  mutate(frequency = (count/sum(count)*100)) %>%
+  ggplot() +
+  geom_col(aes(x = faminc_new, y = frequency),fill = "turquoise4") +
+  geom_text(aes(x = faminc_new, y = frequency, label = round(frequency, digits = 2)), position = position_dodge(0.7),
+            vjust = -0.5, size = 3.5) +
+  scale_x_discrete(labels = str_wrap(c("1" = "Less than $10,000", "2" = "$10,000 - $19,999","3" ="$20,000 - $29,999","4" ="$30,000 - $39,999","5" ="$40,000 - $49,999","6" ="$50,000 - $59,999","7" ="$60,000 - $69,999","8" ="$70,000 - $79,999","9" ="$80,000 - $99,999","10" ="$100,000 - $119,999","11" ="$120,000 - $149,999","12" ="$150,000 - $199,999","13" ="$200,000 - $249,999","14" ="$250,000 - $349,999","15" ="$350,000 - $499,999","16" ="$500,000 or more"), width = 7)) +
+  labs (title = "Income Distribution Among Individuals Who Did Not Vote",
+        x = "Income Distribution",
         y = "Percentage of Individuals",
-        fill = "Gun Ownership",
         caption = "Source: Harvard's Cooperative Election Study 2020") +
-  theme_minimal() +
-  scale_fill_brewer(palette="PuBuGn", labels = c("Personally own a gun", "Not Personally, but owned in HH", "No one in HH", "Not sure"))
+  theme_minimal()
 
-###Need to change order of fill labels
-
+print(income_by_notvoted)
 ```
 
-## Plot 3: Gun Ownership by Voting
+### Home Ownership by Voting Behaviour
 
-Higher proportion of gun ownership by the respondent among people who have voted
+Having understood that on average, individuals who have voted have a higher salary and those who didn't, we can look at the pattern of home ownership to see if this trend holds true. As we would have expected, there is a higher proportion of individuals who own their own home among those who voted than who didn't (68% vs. 42%). Half of the individuals who did not vote, rent a home in our sample while this proportion is only 28% for individuals who voted.
 
-DN - Plot 3 seems more relevant 
-
-``` {r Plot3}
-
-#Plot 3
-
-#Gun ownership by voted/not voted
-voting_data %>%
-  select(voted, urbancity, gunown)%>%
-  na.omit() %>%
-  group_by(voted = as.factor(voted), gun = as.factor(gunown)) %>%
-  summarise(count =  n()) %>%
-  mutate(frequency = (count/sum(count))*100) %>%
-  ggplot(aes(x = voted, y = frequency , fill = gun)) +
-  geom_bar(stat = "identity") + 
-  scale_y_continuous(expand = c(0,0)) +
-  geom_text(aes(label = round(frequency, digits = 2)), size = 3.5, 
-            position = position_stack(vjust = 0.5)) + 
-  scale_x_discrete(labels = c("Voted", "Not Voted")) +
-  labs (title = "Gun Ownership by Voted",
-        x = "Voted",
-        y = "Percentage of Individuals",
-        fill = "Gun Ownership",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
-  theme_minimal() +
-  scale_fill_brewer(palette="PuBuGn", labels = c("Personally own a gun", "Not Personally, but owned in HH", "No one in HH", "Not sure"))
-
-###Need to change order of labels 
-
-```
-
-## Plot 4:Home Ownership by Voted/Not Voted 
-
-Among those who voted, 3/4th own a home
-There is a higher proportion of people who rent among those who haven't voted
 
 ``` {r Plot4}
 #Home Ownership by Voted/Not Voted 
@@ -171,6 +117,7 @@ voting_data %>%
   geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.7),
             vjust = -0.5, size = 3.5) +
   scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,80)) +
   labs (title = "Home Ownership by Voted/Not Voted in 2020 Election",
         x = "Voted in 2020 Election",
         y = "Percentage of Individuals",
@@ -181,279 +128,10 @@ voting_data %>%
   
 ```
 
-## Plot 5: Income Distribution Differences among Voted
+### Educational Attainment by Voting Behaviour
 
-Income distribution among those who have not voted is more right skewed (more people from lower income groups)
-While those who have voted are evenly spread across the distribution 
-
-DN - need to fix axes labels
-``` {r Plot5}
-
-## How is the income distribution among those who voted and those who didn't
-
-#Plot 5
-income_by_voted <- voting_data %>%
-  select(voted,faminc_new) %>%
-  na.omit() %>%
-  filter(voted == 1) %>%
-  filter(faminc_new != 97) %>%
-  group_by(faminc_new = as.factor(faminc_new)) %>%
-  summarise(count =  n()) %>%
-  mutate(frequency = (count/sum(count)*100)) %>%
-  ggplot() +
-  geom_col(aes(x = faminc_new, y = frequency), fill = "lightskyblue") +
-  geom_text(aes(x = faminc_new, y = frequency, label = round(frequency, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3) + 
-  scale_x_discrete(labels = str_wrap(c("Less than $10,000","$10,000 - $19,999","$20,000 - $29,999","$30,000 - $39,999","$40,000 - $49,999","$50,000 - $59,999","$60,000 - $69,999","$70,000 - $79,999","$80,000 - $99,999","$100,000 - $119,999","$120,000 - $149,999","$150,000 - $199,999","$200,000 - $249,999","$250,000 - $349,999","$350,000 - $499,999","$500,000 or more"), width = 7)) +
-  labs (title = str_wrap("Income Distribution Among Individuals Who Voted"),
-        x = "Income Distribution",
-        y = "Percentage of Individuals",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
-  theme_minimal()
-
-print(income_by_voted)
-```
-
-## Plot 6: Income distribution among individuals who did not vote
-
-``` {r Plot6}
-#Plot 6
-income_by_notvoted <- voting_data %>%
-   select(voted,faminc_new) %>%
-  na.omit() %>%
-  filter(voted == 0) %>%
-  filter(faminc_new != 97) %>%
-  group_by(faminc_new = as.factor(faminc_new)) %>%
-  summarise(count =  n()) %>%
-  mutate(frequency = (count/sum(count)*100)) %>%
-  ggplot() +
-  geom_col(aes(x = faminc_new, y = frequency),fill = "turquoise4") +
-  geom_text(aes(x = faminc_new, y = frequency, label = round(frequency, digits = 2)), position = position_dodge(0.7),
-            vjust = -0.5, size = 3) +
-  scale_x_discrete(labels = str_wrap(c("1" = "Less than $10,000", "2" = "$10,000 - $19,999","3" ="$20,000 - $29,999","4" ="$30,000 - $39,999","5" ="$40,000 - $49,999","6" ="$50,000 - $59,999","7" ="$60,000 - $69,999","8" ="$70,000 - $79,999","9" ="$80,000 - $99,999","10" ="$100,000 - $119,999","11" ="$120,000 - $149,999","12" ="$150,000 - $199,999","13" ="$200,000 - $249,999","14" ="$250,000 - $349,999","15" ="$350,000 - $499,999","16" ="$500,000 or more"), width = 7)) +
-  labs (title = "Income Distribution Among Individuals Who Did Not Vote",
-        x = "Income Distribution",
-        y = "Percentage of Individuals",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
-  theme_minimal()
-
-print(income_by_notvoted)
-```
-
-## Plot 6: Participating in any political activity
-
-Those that have voted are more likely to participate in political activity
-
-``` {r Plot7}
-voting_data %>%
-  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
-  na.omit() %>%
-  mutate(political_meetings = if_else(CC20_430a_1 == 2, 0, 1),
-         political_sign = if_else(CC20_430a_2 == 2, 0, 1),
-         work_campaign = if_else(CC20_430a_3 == 2, 0, 1),
-         political_protest = if_else(CC20_430a_4 == 2, 0, 1),
-         contact_public_official = if_else(CC20_430a_5 == 2, 0, 1),
-         donate_money = if_else(CC20_430a_6 == 2, 0, 1),
-         donate_blood = if_else(CC20_430a_7 == 2, 0, 1)) %>%
-  mutate(any_political = if_else(political_meetings == 1 | political_sign == 1 | work_campaign == 1 | political_protest == 1| contact_public_official == 1 | donate_money == 1 | donate_blood == 1, 1, 0 ))  %>%
-  group_by(voted) %>%
-  summarise(any_political = (mean(any_political))*100) %>%
-  ggplot() +
-  geom_col(aes(x = voted, y = any_political, fill = as.factor(voted))) +
-  geom_text(aes(x = voted, y = any_political, label = round(any_political, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
-  scale_x_discrete(labels = c("Voted", "Not Voted")) +
-  scale_y_continuous(limits = c(0,75)) +
-  labs(title = "Partipation in Any Political Activity By Voting Behaviour",
-       subtitle = str_wrap("Political activity includes attending political meetings, putting up a political sign, working for a campaign, participating in a political protest, contacting a public official, donating money to a campaign or donating blood",width = 100),
-        x = "Voted",
-        y = "Percentage of Individuals Who Participated",
-        caption = "Source: Harvard's Cooperative Election Study 2020") + 
-  guides(fill = "none") +
-  theme_minimal() +
-  scale_fill_brewer(palette = "PuBuGn")
-
-```
-
-``` {r AppendixPlot7}
-## Taking part in a political activity 
-
-
-plot_1 <- voting_data %>%
-  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
-  na.omit() %>%
-  mutate(political_meetings = if_else(CC20_430a_1 == 2, 0, 1)) %>%
-  group_by(voted = as.factor(voted)) %>%
-  summarise(political_meetings = (mean(political_meetings))*100) %>%
-  ggplot() +
-  geom_col(aes(x = voted, y = political_meetings, fill = as.factor(voted))) +
-  geom_text(aes(x = voted, y = political_meetings, label = round(political_meetings, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
-  scale_y_continuous(limits = c(0,50)) +
-  scale_x_discrete(labels = c("Voted", "Not Voted")) +
-  guides(fill = "none") +
-  labs(title = "Partipation in Political Meetings by Voting Behaviour",
-        x = "Voted",
-        y = "Percentage of Individuals Who Participated",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
-  theme_minimal() +
-   scale_fill_brewer(palette = "PuBuGn")
-
-
-plot_2 <- 
-  voting_data %>%
-  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
-  na.omit() %>%
-  mutate(political_sign = if_else(CC20_430a_2 == 2, 0, 1)) %>%
-  group_by(voted = as.factor(voted)) %>%
-  summarise(political_sign = (mean(political_sign))*100) %>%
-  ggplot() +
-  geom_col(aes(x = voted, y = political_sign, fill = as.factor(voted))) +
-  geom_text(aes(x = voted, y = political_sign, label = round(political_sign, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
-  scale_y_continuous(limits = c(0,50)) +
-  scale_x_discrete(labels = c("Voted", "Not Voted")) +
-  guides(fill = "none") +
-  labs(title = "Putting Up a Political Sign by Voting Behaviour",
-        x = "Voted",
-        y = "Percentage of Individuals Who Participated",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
-  theme_minimal() +
-   scale_fill_brewer(palette = "PuBuGn")
-
-plot_3 <- 
-  voting_data %>%
-  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
-  na.omit() %>%
-  mutate(work_campaign = if_else(CC20_430a_3 == 2, 0, 1)) %>%
-  group_by(voted = as.factor(voted)) %>%
-  summarise(work_campaign = (mean(work_campaign))*100) %>%
-  ggplot() +
-  geom_col(aes(x = voted, y = work_campaign, fill = as.factor(voted))) +
-  geom_text(aes(x = voted, y = work_campaign, label = round(work_campaign, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
-  scale_y_continuous(limits = c(0,50)) +
-  scale_x_discrete(labels = c("Voted", "Not Voted")) +
-  guides(fill = "none") +
-  labs(title = "Working in a Campaign by Voting Behaviour",
-        x = "Voted",
-        y = "Percentage of Individuals Who Participated",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
-  theme_minimal() +
-   scale_fill_brewer(palette = "PuBuGn")
-
-plot_4 <- 
-  voting_data %>%
-  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
-  na.omit() %>%
-  mutate(political_protest = if_else(CC20_430a_4 == 2, 0, 1)) %>%
-  group_by(voted = as.factor(voted)) %>%
-  summarise(political_protest = (mean(political_protest))*100) %>%
-  ggplot() +
-  geom_col(aes(x = voted, y = political_protest, fill = as.factor(voted))) +
-  geom_text(aes(x = voted, y = political_protest, label = round(political_protest, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
-  scale_y_continuous(limits = c(0,50)) +
-  scale_x_discrete(labels = c("Voted", "Not Voted")) +
-  guides(fill = "none") +
-  labs(title = "Participating in a Political Protest by Voting Behaviour",
-        x = "Voted",
-        y = "Percentage of Individuals Who Participated",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
-  theme_minimal() +
-   scale_fill_brewer(palette = "PuBuGn")
-
-plot_5 <- 
-  voting_data %>%
-  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
-  na.omit() %>%
-  mutate(contact_public_official = if_else(CC20_430a_5 == 2, 0, 1)) %>%
-  group_by(voted = as.factor(voted)) %>%
-  summarise(contact_public_official = (mean(contact_public_official))*100) %>%
-  ggplot() +
-  geom_col(aes(x = voted, y = contact_public_official, fill = as.factor(voted))) +
-  geom_text(aes(x = voted, y = contact_public_official, label = round(contact_public_official, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
-  scale_y_continuous(limits = c(0,50)) +
-  scale_x_discrete(labels = c("Voted", "Not Voted")) +
-  guides(fill = "none") +
-  labs(title = "Contacting a Public Official by Voting Behaviour",
-        x = "Voted",
-        y = "Percentage of Individuals Who Participated",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
-  theme_minimal() +
-   scale_fill_brewer(palette = "PuBuGn")
-
-plot_6 <- 
-  voting_data %>%
-  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
-  na.omit() %>%
-  mutate(donate_money = if_else(CC20_430a_6 == 2, 0, 1)) %>%
-  group_by(voted = as.factor(voted)) %>%
-  summarise(donate_money = (mean(donate_money))*100) %>%
-  ggplot() +
-  geom_col(aes(x = voted, y = donate_money, fill = as.factor(voted))) +
-  geom_text(aes(x = voted, y = donate_money, label = round(donate_money, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
-  scale_y_continuous(limits = c(0,50)) +
-  scale_x_discrete(labels = c("Voted", "Not Voted")) +
-  guides(fill = "none") +
-  labs(title = "Donated Money to a Political Organisation by Voting Behaviour",
-        x = "Voted",
-        y = "Percentage of Individuals Who Participated",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
-  theme_minimal() +
-   scale_fill_brewer(palette = "PuBuGn")
-
-plot_7 <- 
-  voting_data %>%
-  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
-  na.omit() %>%
-  mutate(donate_blood = if_else(CC20_430a_7 == 2, 0, 1)) %>%
-  group_by(voted = as.factor(voted)) %>%
-  summarise(donate_blood = (mean(donate_blood))*100) %>%
-  ggplot() +
-  geom_col(aes(x = voted, y = donate_blood, fill = as.factor(voted))) +
-  geom_text(aes(x = voted, y = donate_blood, label = round(donate_blood, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
-  scale_y_continuous(limits = c(0,50)) +
-  scale_x_discrete(labels = c("Voted", "Not Voted")) +
-  guides(fill = "none") +
-  labs(title = "Donated Blood by Voting Behaviour",
-        x = "Voted",
-        y = "Percentage of Individuals Who Participated",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
-  theme_minimal() +
-   scale_fill_brewer(palette = "PuBuGn")
-
-
-###Beautification changes need to be made to patchwork 
-```
-
-## Plot 8 - Following government and public affairs by voting behaviour
-
-Text would come here
-
-``` {r Plot8}
-
-voting_data %>%
-  select(voted, newsint) %>%
-  na.omit() %>%
-  group_by(voted = as.factor(voted), newsint = as.factor(newsint)) %>%
-  summarise(count =  n()) %>%
-  mutate(frequency = (count/sum(count))*100) %>%
-  ggplot(aes(x = voted, y = frequency , fill = newsint)) +
-  geom_col(stat = "identity", width = 0.7, position = "dodge") + 
-  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.7),
-            vjust = -0.5, size = 3) +
-  scale_x_discrete(labels = c("Voted", "Not Voted")) +
-  scale_y_continuous(limits = c(0,75))+
-  labs (title = "Following government and public affairs by voting behaviour",
-        x = "Voted in 2020 Election",
-        y = "Percentage of Individuals",
-        fill = "Frequency",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
-  theme_minimal() +
-  scale_fill_brewer(palette="PuBuGn", labels = c("Most of the time", "Some of the time", "Only now and then","Hardly at all", "Don't know"), direction = -1)
-
-```
-
-## Plot 9 - Education by Voting Behaviour
-
-Text Here
-
-``` {r Plot9}
+Among those who did not vote, we can see that a little more one-third of the individuals are high school graduates. While comparing the educational attainment among our two groups, we can see that there is a higher proportion of individuals who have completed a 4-year degree (27% vs. 14%) and/or a post graduate degree (17% vs. 6%) among those who voted vs. those who did not. This helps us understand the profile of individuals who did not vote in the election, 
+``` {r Plot5, fig.width = 8 }
 voting_data %>%
   select(voted, educ) %>%
   na.omit() %>%
@@ -466,7 +144,7 @@ voting_data %>%
             vjust = -0.7, size = 3) +
   scale_x_discrete(labels = c("Voted", "Not Voted")) +
   scale_y_continuous(limits = c(0,75))+
-  labs (title = "Educational attainment by voting behaviour",
+  labs (title = "Educational Attainment by Voting Behaviour",
         x = "Voted in 2020 Election",
         y = "Percentage of Individuals",
         fill = "Educational Attainment",
@@ -475,39 +153,12 @@ voting_data %>%
   scale_fill_brewer(palette="PuBuGn", labels = c("Did not graduate from high school", "High school graduate", "Some college, but no degree (yet)", "2-year college degree", "4-year college degree", "Postgraduate degree"), direction = -1)
 
 ```
-## Plot 10 -Ideology by Voting Behaviour
 
+### Investment in Stock Market/Mutual Funds by Voting Behaviour
 
-Text here
+In line with understanding the income distribution and home ownership patterns between the two groups, we also looked at whether there was any difference among these groups while making investments in the stock market. Only a quarter of the individuals who did not vote have any investment in the stock market, while 77% of the individuals who did not vote have not made any investments in these markets. Among the individuals who voted, there is almost an equal split between investing and not investing in the stock market/mutual fund. 
 
-
-``` {r Plot10}
-voting_data %>%
-  select(voted, ideo5) %>%
-  na.omit() %>%
-  group_by(voted = as.factor(voted), ideo5 = as.factor(ideo5)) %>%
-  summarise(count =  n()) %>%
-  mutate(frequency = (count/sum(count))*100) %>%
-  ggplot(aes(x = voted, y = frequency , fill = ideo5)) +
-  geom_col(stat = "identity", width = 0.9, position = "dodge") + 
-  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.9),
-            vjust = -0.7, size = 3) +
-  scale_x_discrete(labels = c("Voted", "Not Voted")) +
-  scale_y_continuous(limits = c(0,75))+
-  labs (title = "Political ideology by Voting Behaviour",
-        x = "Voted in 2020 Election",
-        y = "Percentage of Individuals",
-        fill = "Political Ideology",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
-  theme_minimal() +
-  scale_fill_manual(values = c("#2166ac", "#67a9cf","#e0e0e0", "#ef8a62","#b2182b", "#ffffbf"), labels = c("Very liberal", "Liberal", "Moderate", "Conservative", "Very Conservative", "Not Sure"))
-
-```
-## Plot 11
-
-Text Here
-
-``` {r Plot11}
+``` {r Plot6}
 voting_data %>%
   select(voted, investor) %>%
   na.omit() %>%
@@ -530,3 +181,246 @@ voting_data %>%
 
 ```
 
+### Extent of Following Government and Public Affairs
+
+63% of the individuals who voted stated that they follow government and public affairs "most of the time", while 25% of them follow "some of the time". There is a clear contrast between our two voting groups. 23% of the individuals who did not vote stated that they only follow the news every now and then, while 16% stated that hardly follow it. With  87% of the group that voted following the news atleast "some of the time", this number is only at 55% in the group that did not vote.  
+
+``` {r Plot7}
+
+voting_data %>%
+  select(voted, newsint) %>%
+  na.omit() %>%
+  group_by(voted = as.factor(voted), newsint = as.factor(newsint)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes(x = voted, y = frequency , fill = newsint)) +
+  geom_col(stat = "identity", width = 0.7, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.7),
+            vjust = -0.5, size = 3) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,75))+
+  labs (title = "Extent of Following Government and Public Affairs by Voting Behaviour",
+        x = "Voted in 2020 Election",
+        y = "Percentage of Individuals",
+        fill = "Frequency",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+  scale_fill_brewer(palette="PuBuGn", labels = c("Most of the time", "Some of the time", "Only now and then","Hardly at all", "Don't know"), direction = -1)
+
+```
+
+### Participation in Any Political Activity
+
+There is a higher proportion of individuals participating in a political activity among the group that voted than those who didn't. While this is expected, we also see 28% of the individuals who did not vote partipating in a political activity in the past year.
+(Political activity includes attending political meetings, putting up a political sign, working for a campaign, participating in a political protest, contacting a public official, donating money to a campaign or donating blood)
+
+Note: Participation by voting behavior for each activity is given in the appendix. 
+
+``` {r Plot8}
+voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(political_meetings = if_else(CC20_430a_1 == 2, 0, 1),
+         political_sign = if_else(CC20_430a_2 == 2, 0, 1),
+         work_campaign = if_else(CC20_430a_3 == 2, 0, 1),
+         political_protest = if_else(CC20_430a_4 == 2, 0, 1),
+         contact_public_official = if_else(CC20_430a_5 == 2, 0, 1),
+         donate_money = if_else(CC20_430a_6 == 2, 0, 1),
+         donate_blood = if_else(CC20_430a_7 == 2, 0, 1)) %>%
+  mutate(any_political = if_else(political_meetings == 1 | political_sign == 1 | work_campaign == 1 | political_protest == 1| contact_public_official == 1 | donate_money == 1 | donate_blood == 1, 1, 0 ))  %>%
+  group_by(voted) %>%
+  summarise(any_political = (mean(any_political))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = any_political, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = any_political, label = round(any_political, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,75)) +
+  labs(title = "Partipation in Any Political Activity by Voting Behaviour",
+       subtitle = str_wrap("Political activity includes attending political meetings, putting up a political sign, working for a campaign, participating in a political protest, contacting a public official, donating money to a campaign or donating blood",width = 100),
+        x = "Voted",
+        y = "Percentage of Individuals Who Participated",
+        caption = "Source: Harvard's Cooperative Election Study 2020") + 
+  guides(fill = "none") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "PuBuGn")
+
+```
+
+### Political Ideology by Voting Behaviour
+
+To understand an individual's political ideology, they were asked where they fall on the spectrum from Very Liberal to Very Conservative. 35% of the individuals who voted are liberal (Very liberal or liberal) while only 18% of the individual who did not vote are liberal. We find that 40% of the individuals who did not vote are "moderate" and not falling into either a liberal or conservative category. Among those voted, ~65% of the individuals have chosen their ideological group, while only ~45% of the individuals who did not vote have categorised themselves. 
+
+``` {r Plot9}
+voting_data %>%
+  select(voted, ideo5) %>%
+  na.omit() %>%
+  group_by(voted = as.factor(voted), ideo5 = as.factor(ideo5)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes(x = voted, y = frequency , fill = ideo5)) +
+  geom_col(stat = "identity", width = 0.9, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.9),
+            vjust = -0.7, size = 3) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,75))+
+  labs (title = "Political Ideology by Voting Behaviour",
+        x = "Voted in 2020 Election",
+        y = "Percentage of Individuals",
+        fill = "Political Ideology",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+  scale_fill_manual(values = c("#2166ac", "#67a9cf","#e0e0e0", "#ef8a62","#b2182b", "#ffffbf"), labels = c("Very liberal", "Liberal", "Moderate", "Conservative", "Very Conservative", "Not Sure"))
+
+```
+
+## Appendix
+
+### Participation in a Political Activity by Voting Behaviour 
+
+``` {r Appendix}
+## Taking part in a political activity 
+
+
+plot_1 <- voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(political_meetings = if_else(CC20_430a_1 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(political_meetings = (mean(political_meetings))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = political_meetings, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = political_meetings, label = round(political_meetings, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_y_continuous(limits = c(0,50)) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  guides(fill = "none") +
+  labs(title = "Political Meetings",
+        x = "Voted",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+   scale_fill_brewer(palette = "PuBuGn")
+
+
+plot_2 <- 
+  voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(political_sign = if_else(CC20_430a_2 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(political_sign = (mean(political_sign))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = political_sign, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = political_sign, label = round(political_sign, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_y_continuous(limits = c(0,50)) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  guides(fill = "none") +
+  labs(title = "Putting Up a Political Sign",
+        x = "Voted",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+   scale_fill_brewer(palette = "PuBuGn")
+
+plot_3 <- 
+  voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(work_campaign = if_else(CC20_430a_3 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(work_campaign = (mean(work_campaign))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = work_campaign, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = work_campaign, label = round(work_campaign, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_y_continuous(limits = c(0,50)) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  guides(fill = "none") +
+  labs(title = "Working in a Campaign",
+        x = "Voted",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+   scale_fill_brewer(palette = "PuBuGn")
+
+plot_4 <- 
+  voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(political_protest = if_else(CC20_430a_4 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(political_protest = (mean(political_protest))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = political_protest, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = political_protest, label = round(political_protest, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_y_continuous(limits = c(0,50)) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  guides(fill = "none") +
+  labs(title = "Participating in a Political Protest",
+        x = "Voted",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+   scale_fill_brewer(palette = "PuBuGn")
+
+plot_5 <- 
+  voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(contact_public_official = if_else(CC20_430a_5 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(contact_public_official = (mean(contact_public_official))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = contact_public_official, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = contact_public_official, label = round(contact_public_official, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_y_continuous(limits = c(0,50)) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  guides(fill = "none") +
+  labs(title = "Contacting a Public Official",
+        x = "Voted",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+   scale_fill_brewer(palette = "PuBuGn")
+
+plot_6 <- 
+  voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(donate_money = if_else(CC20_430a_6 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(donate_money = (mean(donate_money))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = donate_money, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = donate_money, label = round(donate_money, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_y_continuous(limits = c(0,50)) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  guides(fill = "none") +
+  labs(title = str_wrap("Donated Money to a Political Organisation", width = 25),
+        x = "Voted",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+   scale_fill_brewer(palette = "PuBuGn")
+
+plot_7 <- 
+  voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(donate_blood = if_else(CC20_430a_7 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(donate_blood = (mean(donate_blood))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = donate_blood, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = donate_blood, label = round(donate_blood, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_y_continuous(limits = c(0,50)) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  guides(fill = "none") +
+  labs(title = "Donating Blood",
+        x = "Voted",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+   scale_fill_brewer(palette = "PuBuGn")
+
+plot_1 + plot_2 + plot_3 + plot_4 
+plot_5 + plot_6 + plot_7
+```
