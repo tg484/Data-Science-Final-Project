@@ -46,7 +46,6 @@ library(vip)
 library(parsnip)
 library(dials)
 library(ranger)
-
 ```
 
 ## INTRODUCTION
@@ -1282,8 +1281,7 @@ plot_1 <- voting_data %>%
   guides(fill = "none") +
   labs(title = "Political Meetings",
         x = "Voted",
-        y = "Percentage of Individuals",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
+        y = "Percentage of Individuals") +
   theme_minimal() +
    scale_fill_brewer(palette = "PuBuGn")
 
@@ -1303,8 +1301,7 @@ plot_2 <-
   guides(fill = "none") +
   labs(title = "Putting Up a Political Sign",
         x = "Voted",
-        y = "Percentage of Individuals",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
+        y = "Percentage of Individuals") +
   theme_minimal() +
    scale_fill_brewer(palette = "PuBuGn")
 
@@ -1323,8 +1320,7 @@ plot_3 <-
   guides(fill = "none") +
   labs(title = "Working in a Campaign",
         x = "Voted",
-        y = "Percentage of Individuals",
-        caption = "Source: Harvard's Cooperative Election Study 2020") +
+        y = "Percentage of Individuals") +
   theme_minimal() +
    scale_fill_brewer(palette = "PuBuGn")
 
