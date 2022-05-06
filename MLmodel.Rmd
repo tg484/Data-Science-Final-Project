@@ -23,22 +23,38 @@ library(dials)
 library(ranger)
 ```
 
+INTRODUCTION
+
+In the past few years, political polling has missed the mark in accurately predicting outcomes for high-profile presidential elections. In 2016, election forecasters consistently put Hillary Cliton’s probability of winning at anywhere from 72 percent to over 90 percent.  While most polls correctly predicted Joe Biden winning the presidency in 2020, polling overstated the margins by which Biden would win the presidency -  polling error for the national popular vote was highest in 40 years. This can be explained by one or more of these three factors: shifts in voter preferences between the time of the poll and when the ballot is cast, biased samples with inaccurate proportions of a candidate’s voters, and incorrect predictions about likely voters.  The third factor - predicting whether an individual will vote - will be the focus of our study.
+
+In 2016, the voters pollsters were anticipating, particularly in Midwestern states that defied expectations, did not show up to vote. It was later revealed that likely-voter turnout rates were biased towards Hillary Clinton; actual turnout was more favorable to Donald Trump than pre-election surveys had predicted. In 2020, pollsters once again understated the likely-voter turnout rates for Trump as millions of “shy Trump voters” cast a ballot on election day. Consequently, making accurate predictions about likely voter turnout is fundamental to accurately predicting electoral outcomes.
+  
+Our study seeks to improve the accuracy of predicting likely voter turnout by identifying voter characteristics and attitudes that are strong predictors of voting. There is an abundance of research and numerous theories on the relationship between voters’ demographics and likelihood of voting. For instance, individuals with higher incomes and education are more likely to cast a ballot. Relatedly, voter attitudes on the economy, social issues, and ideology can be predictors of whether an individual votes. We seek to test the extent to which these demographic characteristics and attitudes explain the likelihood of voting. 
+
+In this study, we use demographic characteristics and attitudes to predict whether an individual voted in the 2020 presidential election. Demographics include characteristics such as race, gender, income, employment status, and attitudes include views on abortion, policing, gun ownership and economic conditions. Some additional predictors include past voting behavior, social media use, political ideology and region. Our goal is to identify the top predictors of voting in 2020, and use these predictors to improve future election polling by allowing pollsters to more accurately identify likely voters. 
+
+This study is divided into three section: the first section of includes an exploratory data analysis, the second part entails machine learning and the final part includes geospatial analysis. 
+
+MACHINE LEARNING:
+To predict whether an individual voted in the 2020 presidential elections, we built three different models: decision trees, logistic regression and random forest. The outcome variable - voted - was coded as 0 if an individual did not vote, and 1 if an individual voted. Our analysis only includes voters that are registered to vote and observations with missing predictor values were dropped from the analysis. 
+
+The data was split into two sections - training and testing - 80 percent of the data was assigned to training, and the remainder was assigned to testing. We performed 10-fold cross validation to improve model performance. Preprocessing involved dropping all predictors with near zero variance, dummy encoding all categorical predictors and downsampling to reduce class imbalance.
+
+Precision - how often a classifier is correct when predicting events - is the relevant outcome metric in this study. In the context of election polling, our objective is to accurately identify likely voters using individual characteristics or attitudes and improve polling accuracy. False positive - a situation where the model predicts that an individual voted, when in fact, they did not can be costly and generate inaccurate predictions for likely voters. We seek to reduce the false positive rates and improve model precision.
+
+
 ```{r library load data and recode variables}
 # load the data
 voting_data <- read_csv("CES20_Common_OUTPUT_vv.csv") %>%
-  mutate(age = birthyr - 2022) %>%
-  select(CC20_401, birthyr, gender, educ, race, CC20_332a, CC20_302, CC20_309e, CC20_350b, urbancity, ideo5, pew_religimp, ownhome,newsint, faminc_new, investor, internethome, sexuality, CC20_331e, gunown, child18, votereg, CC20_307, CC20_303, employ, marstat, immstat, union, phone, presvote16post, inputstate, dualcit, region, CC20_360, edloan, student, healthins_1, healthins_2, healthins_3, healthins_4, healthins_5, healthins_6)
+  select(CC20_401, birthyr, gender, educ, race, CC20_332a, CC20_302, CC20_309e, CC20_350b, urbancity, ideo5, pew_religimp, ownhome, newsint, faminc_new, investor, internethome, sexuality, CC20_331e, gunown, child18, votereg, CC20_307, CC20_303, employ, marstat, immstat, union, phone, presvote16post, inputstate, dualcit, region, healthins_1, healthins_2, healthins_3, healthins_4, healthins_5, healthins_6, CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7, CC20_430a_8, numchildren, dualcit, CC20_300_1, CC20_300_2, CC20_300_3, CC20_300_4, CC20_300_5)
 
-# create age variable, filter registered voters and drop missing values
+# filter registered voters and drop missing values
 voting_data <- voting_data %>%
-  mutate(birthyr = 2020 - birthyr) %>%
   filter(votereg == 1) %>%
+  mutate(age = 2020 - birthyr) %>%
+  select(-birthyr) %>%
   na.omit()
 
-# recode internet at home to match implemtation data
-voting_data <- voting_data %>%
-  mutate(internethome = if_else(condition = internethome <= 2, true = 1,
-                                false = 2))
 
 # create a binary variable for voted or not and convert to factor
 voting_data <- voting_data %>% 
@@ -46,7 +62,7 @@ voting_data <- voting_data %>%
                                false = 0))%>%
   mutate(voted = factor(voted, labels = c("1", "0"), levels = c("1", "0")))
 
-# drop voter registration (since it is a prerequiste, not a predictor)
+# drop voter registration (since it is a prerequisite, not a predictor)
 voting_data <- voting_data %>% 
   select(-votereg)
 ```
@@ -69,6 +85,7 @@ voting_rec <-
   themis::step_downsample(voted)
 ```
 
+The first model involves the use of decision trees with hyperparameter tuning. We tune two hyperparameters:  cost complexity and tree depth. As we show below, the best performing model has a precision of 0.983.
 ```{r decision tree with hyper parameter tuning: algorithm #1}
 
 # tune hyper parameters
@@ -117,7 +134,20 @@ tree_final_fit_voting <- final_tree_wf_voting %>%
   fit(data = voting_train)
 ```
 
+```{r - plot 10 resamples for decision tree}
+#plot RMSE across 10 resamples for decision tree
+tree_res_voting  %>%
+  collect_metrics() %>%
+  filter(.metric == "precision") %>%
+  mutate(tree_depth = factor(tree_depth)) %>%
+  ggplot(aes(cost_complexity, mean, color = tree_depth)) +
+  geom_line(size = 1.5, alpha = 0.6) +
+  geom_point(size = 2) +
+  facet_wrap(~ .metric, scales = "free", nrow = 2) +
+  scale_x_log10(labels = scales::label_number()) 
+```
 
+The second model is a simple logistic regression with "voted" as the dependent variable. The best model has a precision of 0.986.
 ```{r logistic regression: algorithm #2}
 # build a model
 logistic_mod_voting <-
@@ -157,12 +187,22 @@ logistic_fit_voting <-
   fit(data = voting_train)
 ```
 
+```{r - plot 10 resamples for logistic regression}
+#plot RMSE across 10 resamples for linear regression
+collect_metrics(logistic_res_voting, summarize = FALSE) %>%
+  filter(.metric == "precision") %>%
+  ggplot(aes(id, .estimate, group = .estimator)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal()
+```
 
-```{r random forest: part 1}
+The final algorithm involves creating a random forest model. As we show below, the best performing model has a precision of .988
+```{r random forest: algorithm #3}
 #create a model
 rf_mod_voting <-
-  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
-  set_engine("ranger") %>%
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger", importance = "impurity") %>%
   set_mode("classification")
 
 #create a workflow
@@ -174,11 +214,7 @@ rf_wf_voting <-
 #tune the model
 rf_fit_rs_voting <-
   rf_wf_voting %>%
-  tune_grid(folds_voting, 
-            grid = 25,
-            control = control_grid(save_pred = TRUE),
-            metrics = metric_set(accuracy, roc_auc, precision))
-
+  fit_resamples(folds_voting, metrics = metric_set(accuracy, roc_auc, precision))
 
 #view the accuracy, roc and precision
 rf_fit_rs_voting %>%
@@ -193,22 +229,55 @@ rf_best_voting <-
   rf_fit_rs_voting %>%
   select_best("precision")
 
-```
-```{r random forest: part 2}
-# the last model
-last_rf_mod_voting <-
-  rand_forest(mtry = 6, min = 14, trees = 1000) %>%
-  set_engine("ranger", importance = "impurity") %>%
-  set_mode("classification")
+#finalize the workflow
+final_rf_wf_voting <- rf_wf_voting %>%
+  finalize_workflow(rf_best_voting)
 
-# the last workflow
-last_rf_wf_voting <-
-  rf_wf_voting %>%
-  update_model(last_rf_mod_voting)
-
-# the last fit
-rf_last_fit <-
-  last_rf_wf_voting %>%
+#fit to training data
+final_fit_rf_voting <- final_rf_wf_voting %>%
   fit(data = voting_train)
-
 ```
+
+```{r - plot 10 resamples for random forest}
+collect_metrics(rf_fit_rs_voting, summarize = FALSE) %>%
+  filter(.metric == "precision") %>%
+  ggplot(aes(id, .estimate, group = .estimator)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal()
+```
+
+We now identify the model with the highest precision.
+```{r - show the highest precision models}
+bind_rows(
+  `Decision Tree` = show_best(tree_res_voting, metric = "precision", n = 1),
+  `Logistic Regression` = show_best(logistic_res_voting, metric = "precision", n = 1),
+  `Random Forest` = show_best(rf_fit_rs_voting, metric = "precision",n = 1),
+  .id = "model"
+)
+```
+
+Since the random forest model has the highest precision, it will be implemented on the testing data. We also calculate the precision on the testing data below, and find that it is 0.98.
+```{r - make preductions on testing data using "best model" part 4}
+# The random forest model has the highest precision - hence, it is the "best model."
+
+predictions_test <-
+  bind_cols(
+    voting_test,
+    predict(object = final_fit_rf_voting, new_data = voting_test)
+  )
+
+#calculate precision on testing data
+precision(data = predictions_test, truth = voted, estimate = .pred_class)
+```
+
+We have identified the  top ten top predictors for voting in the 2020 elections. The candidate an individual voted for in 2016 - presvote16post- was the most important predictor for whether an individual voted in the 2020 elections. As expected, demographic variables such as age and education are important predictors. Another important predictor is how frequently an individual follows the news - newsint. Family income, employment status and state were also important predictors. Finally, whether an individual owns a home or invests in stocks were important predictors of voting in the 2020 elections.
+```{r identify most important features}
+final_fit_rf_voting %>% 
+  extract_fit_parsnip() %>% 
+  vip(num_features = 10)
+```
+
+CONCLUSION
+
+While our model has a high precision on both the testing and training data, we could further improve our model by adding additional predictors such as length of voter registration, party affiliation, competitiveness of elections that the Harvard CES study does not currently have data on. The model performance could be further improved by tuning the hyperparameters for the random forest and exploring other types of regressions, such as lasso and elastic net. Furthermore, the usefulness of this model can be tested by implementing it on other election data that has identifcal predictors [Priyasha to include a short summary of challenges here]
