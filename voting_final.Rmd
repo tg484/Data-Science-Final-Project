@@ -1201,7 +1201,7 @@ predictions_test <-
 precision(data = predictions_test, truth = voted, estimate = .pred_class)
 ```
 
-We have identified the  top ten top predictors for voting in the 2020 elections. The candidate an individual voted for in 2016 - presvote16post- was the most important predictor for whether an individual voted in the 2020 elections. As expected, demographic variables such as age and education are important predictors. Another important predictor is how frequently an individual follows the news - newsint. Family income, employment status and state were also important predictors. Finally, whether an individual owns a home, invests in stocks, donated money to a campaign were important predictors of voting in the 2020 elections.
+We have identified the top ten predictors for voting in the 2020 elections. The candidate an individual voted for in 2016 - presvote16post- was the most important predictor for whether an individual voted in the 2020 elections. As expected, demographic variables such as age and education are important predictors. Another important predictor is how frequently an individual follows the news - newsint. Family income, employment status and state were also important predictors. Finally, whether an individual owns a home, invests in stocks, donated money to a campaign were important predictors of voting in the 2020 elections.
 
 ```{r identify most important features}
 final_fit_rf_voting %>% 

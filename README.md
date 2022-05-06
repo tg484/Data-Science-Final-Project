@@ -4,6 +4,8 @@
 
 URL of the repository: https://github.com/tg484/Data-Science-Final-Project
 
+Project Website:
+
 **Authors:**<br/>
 Priyasha Chawla<br/>
 Tanya Grover<br/>
@@ -34,13 +36,12 @@ A  brief description of the files/directories in the repository
 
 1. Install the required packages as listed below:
 	* tidyverse
-        * tidyverse
- 	* lubridate
-        * ggiraph 
+	* lubridate
+	* ggiraph 
 	* tigris   
 	* sf
-        * leaflet
-        * patchwork
+	* leaflet
+	* patchwork
 	* tidymodels
 	* themis
 	* rpart.plot
