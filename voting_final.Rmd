@@ -1,0 +1,1412 @@
+---
+title: "Predicting Voter Turnout in the 2020 Presidential Election" 
+author: "Priyasha Chawla, Tanya Grover, Deepika Nagesh, Payal Soneja"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+  pdf_document:
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r include = FALSE}
+def.chunk.hook  <- knitr::knit_hooks$get("chunk")
+knitr::knit_hooks$set(chunk = function(x, options) {
+  x <- def.chunk.hook(x, options)
+  ifelse(options$size != "normalsize", paste0("\n \\", options$size,"\n\n", x, "\n\n \\normalsize"), x)
+})
+
+```
+
+```{r, results = "hide"}
+#Set Up: Install the following packages and load the libraries.
+#packages <- c("tidyverse", "readr","dials", "ranger", "parsnip","lubridate",
+             # "leaflet", "sf", "tigris", "arcos",
+             # "sp", "rmapshaper")
+#if (length(setdiff(packages, rownames(installed.packages()))) > 0) {
+#  install.packages(setdiff(packages, rownames(installed.packages())), repos = "https://cran.us.r-project.org")  
+#}
+
+library(tidyverse)
+library(lubridate)
+library(ggiraph) # to use geom_sf_interactive
+library(tigris)
+library(sf)
+library(leaflet)
+library(patchwork)
+library(tidymodels)
+library(themis)
+library(rpart.plot)
+library(vip)
+library(parsnip)
+library(dials)
+library(ranger)
+
+```
+
+## INTRODUCTION
+
+In the past few years, political polling has missed the mark in accurately predicting outcomes for high-profile presidential elections. In 2016, election forecasters consistently put Hillary Cliton’s probability of winning at anywhere from 72 percent to over 90 percent.  While most polls correctly predicted Joe Biden winning the presidency in 2020, polling overstated the margins by which Biden would win the presidency -  polling error for the national popular vote was highest in 40 years. This can be explained by one or more of these three factors: shifts in voter preferences between the time of the poll and when the ballot is cast, biased samples with inaccurate proportions of a candidate’s voters, and incorrect predictions about likely voters.  The third factor - predicting whether an individual will vote - will be the focus of our study.
+
+In 2016, the voters pollsters were anticipating, particularly in Midwestern states that defied expectations, did not show up to vote. It was later revealed that likely-voter turnout rates were biased towards Hillary Clinton; actual turnout was more favorable to Donald Trump than pre-election surveys had predicted. In 2020, pollsters once again understated the likely-voter turnout rates for Trump as millions of “shy Trump voters” cast a ballot on election day. Consequently, making accurate predictions about likely voter turnout is fundamental to accurately predicting electoral outcomes.
+  
+Our study seeks to improve the accuracy of predicting likely voter turnout by identifying voter characteristics and attitudes that are strong predictors of voting. There is an abundance of research and numerous theories on the relationship between voters’ demographics and likelihood of voting. For instance, individuals with higher incomes and education are more likely to cast a ballot. Relatedly, voter attitudes on the economy, social issues, and ideology can be predictors of whether an individual votes. We seek to test the extent to which these demographic characteristics and attitudes explain the likelihood of voting. 
+
+In this study, we use demographic characteristics and attitudes to predict whether an individual voted in the 2020 presidential election. Demographics include characteristics such as race, gender, income, employment status, and attitudes include views on abortion, policing, gun ownership and economic conditions. Some additional predictors include past voting behavior, social media use, political ideology and region. Our goal is to identify the top predictors of voting in 2020, and use these predictors to improve future election polling by allowing pollsters to more accurately identify likely voters. 
+
+This study is divided into three sections: the first section includes sample description, followed by exploratory data analysis and geospatial analysis. In the final section,  we built three different models: logistic regression, decision trees and random forest to predict voter turnout,
+
+We extract the voting csv file from Harvard Dataverse website ande load the dataset in R for advanced clenaing and transformation.
+
+```{r extraction, results = "hide"}
+# Extracting the csv file from harvard dataverse website
+data_url <- "https://dataverse.harvard.edu/api/access/datafile/4949558"
+
+download.file(
+  data_url,
+  destfile = "data/voting_data.csv",
+  mode = "wb"
+)
+
+```
+
+```{r load data and clean, results = "hide"}
+# load the data
+voting_data <- read_csv("data/voting_data.csv") %>%
+  select(CC20_401, birthyr, gender, educ, race, CC20_332a, CC20_302, CC20_309e, CC20_350b, urbancity, ideo5, pew_religimp, ownhome, newsint, faminc_new, investor, internethome, sexuality, CC20_331e, gunown, child18, votereg, CC20_307, CC20_303, employ, marstat, immstat, union, phone, presvote16post, inputstate, dualcit, region, healthins_1, healthins_2, healthins_3, healthins_4, healthins_5, healthins_6, CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7, CC20_430a_8, numchildren, CC20_300_1, CC20_300_2, CC20_300_3, CC20_300_4, CC20_300_5,  CC20_300a, CC20_300c , CC20_320d, CC20_320b, inputstate, countyfips, countyname, CC20_364a)
+  
+# filter registered voters and drop missing values
+voting_data <- voting_data %>%
+  filter(votereg == 1) %>%
+  mutate(age = 2020 - birthyr) %>%
+  select(-birthyr)
+
+# create a binary variable for voted or not and convert to factor
+voting_data <- voting_data %>% 
+    mutate(voted = if_else(condition = CC20_401 == 5, true = 1,
+                               false = 0))%>%
+  mutate(voted = factor(voted, labels = c("1", "0"), levels = c("1", "0")))
+
+# drop voter registration (since it is a prerequisite, not a predictor)
+voting_data <- voting_data %>% 
+  select(-votereg)
+
+```
+
+## RESEARCH METHODOLOGY
+
+### Data Sources 
+
+We use Harvard’s Cooperative Congressional Election Study (CCES) to predict voter turnout. The CCES is a national stratified sample survey that validates respondents’ voter behavior by matching voter files to their survey data. The CCES is a nationally representative stratified survey administered every two election years. The CES Common Content has five parts - sample identifiers, profile questions, pre-election questions, post-election questions, and contextual data.  
+
+We use variables from the following modules - profile questions, sample identifiers, pre and post-election questionnaires. Between September and October, 61,000 American adults were recruited for the pre-election survey; more than 50,000 of these respondents also completed the post-election survey in November. The post-election questionnaire collects information about whether a respondent voted in the 2020 election - we will use this as our predictor variable to create a binary classification model. 
+
+### Challenges 
+
+We were looking for an implementation data set to use the predictive model created using the CCES dataset. To apply our model to a new dataset and test predictive accuracy, we selected three data sets. 
+
++ *Current Population Survey (CPS):* The CPS is a national survey that reports monthly statistics on labor force participation. Data collected from the CPS is also representative at the state level. In addition to collecting demographic data, supplemental surveys collecting information on voting and registration have been administered every two years. The latest voting and registration data is available for the November 2020 election. 
+
++ *American Community Survey (ACS):* The ACS is an ongoing survey that provides one year and five year estimates. ACS forms are mailed to specific addresses and each address has about 1 in 480 chance of being selected every month. For surveys that are not completed, there is a personal follow up visit by a Census Bureau official.
+
++ *American National Election Studies (ANES):* The ANES 2020 is a cross-sectional survey that is also divided into waves: pre-election and post-election. The population of interest is US eligible voters. The survey was conducted in three modes: web only, web and phone, and mixed video (video, web, phone). 8,280 interviews were conducted for the pre-election and 7,449 interviews were conducted for the post-election wave
+
+We then created a variable mapping framework to check the number of overlapping variables with CCES data. There were only a few overlapping variables in the CPS and ACS dataset. While we found multiple overlapping variables in the ANES election study, there were multiple restricted variables. As a result, we decided to drop the three datasets and focus on the CCES data. 
+
+---
+
+## DESCRIPTIVE STATISTICS
+
+#### Sample distribution by race 
+
+```{r}
+#Sample distribution by race
+
+#Plotting sample distribution by race
+Plot_race <- voting_data %>%
+  select(race)%>%
+  na.omit() %>%
+  group_by(race = as.factor(race)) %>%
+  summarise(count = n())%>%
+  mutate(frequency = (count/sum(count))*100)%>%
+  ggplot(aes (x = race, y = frequency, fill = race)) +
+  geom_col(stat = "identity", width = 0.7, position = "dodge") +
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.7),
+            vjust = -0.5, size = 3) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0,100)) + 
+  labs(title = "Sample distribution by race",
+    caption ="Source: Harvard's Cooperative Election Study 2020",
+    x = "Race", 
+    y = "Percentage of Individuals",
+    fill ="Race") +
+  scale_x_discrete(labels = c())+
+  scale_fill_brewer(palette="Dark2", labels = c("White", "Black/African-American", "Hispanic/Latino", "Asian/Asian-American", "Native American","Middle Eastern", "Two or more races", "Other", "Unknown"))
+
+print(Plot_race)
+```
+
+
+Around 73% respondents in the Cooperative Election Study are White. Black/African- American and Hispanic/Latino respondents constitute 19% of the total sample.
+
+#### Sample distribution by age
+
+```{r}
+#Sample distribution by age
+
+#Making new variables for age-groups
+voting_data_age <- voting_data %>%
+  mutate(agegroup = case_when(age >= 18  & age <= 24 ~ '18_24',
+                                             age >= 25  & age <= 34 ~ '25_34',
+                                             age >= 35  & age <= 44 ~ '35_44',
+                                             age >= 45  & age <= 54 ~ '45_54',
+                                             age >= 55  & age <=64 ~ '55_64',
+                                             age >= 65  & age <= 74 ~ '65_74',
+                                             age >= 75  ~ '75+'))
+
+#Plotting age groups
+Plot_age <- voting_data_age %>%
+  group_by(agegroup = as.factor(agegroup)) %>%
+  summarise(count = n())%>%
+  mutate(frequency = (count/sum(count))*100)%>%
+  ggplot(aes (x = agegroup, y = frequency, fill = agegroup)) +
+  geom_col(stat = "identity", width = 0.7, position = "dodge") +
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.7),
+            vjust = -0.5, size = 3) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0,100)) +
+  labs(title = "Sample distribution by age",
+    caption ="Source: Harvard's Cooperative Election Study 2020",
+    x = "Age Group",
+    y = "Percentage of Individuals",
+    fill ="Age group") +
+  scale_x_discrete(labels = c("18_24", "25_34","35_44", "45_55", "55_64", "64_74", "75+")) +
+  scale_fill_brewer(palette="PuBuGn", labels = c("18_24", "25_34","35_44", "45_54", "55_64", "65_74", "75+"))
+print(Plot_age)
+
+```
+
+
+More than half of all the respondents fall in the age group of 45-64. Only 8% of the respondents are youth between the age of 18-24.
+
+
+#### Sample distribution by sexuality 
+
+```{r}
+##Sample distribution by sexuality
+
+#Plotting sexuality distribution in sample
+Plot_sex <- voting_data %>%
+  select(sexuality)%>%
+  na.omit()%>%
+  group_by(sexuality = as.factor(sexuality)) %>%
+  summarise(count = n())%>%
+  mutate(frequency = (count/sum(count))*100)%>%
+  ggplot(aes (x = sexuality, y = frequency, fill =sexuality)) +
+  geom_col(stat = "identity", width = 0.7, position = "dodge") +
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.7),
+            vjust = -0.5, size = 3) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0,100)) + 
+  labs(title = "Sample distribution by sexuality",
+    caption ="Source: Harvard's Cooperative Election Study 2020",
+    x = "Sexuality", 
+    y = "Percentage of Individuals",
+    fill = "Sexuality") +
+  scale_x_discrete(labels = c())+
+  scale_fill_manual(values = c("#2166ac", "#67a9cf","#e0e0e0", "#ef8a62","#b2182b", "#ffffbf"), labels = c("Heterosexual/straight", "Lesbina/Gay woman","Gay man", "Bisexual", "Other", "Prefer not to say"))
+
+print(Plot_sex)
+```
+
+Almost 87% of the respondents identify as Heterosexual/straight. The LGBTQI community constitutes less than 10% of the sample. 
+
+#### Sample distribution by gender
+
+```{r}
+##Sample distribution by gender
+Plot_gen <- voting_data %>%
+  select(gender)%>%
+  na.omit()%>%
+  group_by(gender = as.factor(gender)) %>%
+  summarise(count = n())%>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes (x = gender, y = frequency, fill=gender)) +
+  geom_col(stat = "identity", width = 0.7, position = "dodge") +
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.7),
+            vjust = -0.5, size = 3)+
+  theme_minimal() +
+  scale_y_continuous(limits = c(0,100)) + 
+  labs(title = "Sample distribution by gender",
+    caption ="Source: Harvard's Cooperative Election Study 2020",
+    x = "Gender", 
+    y = "Percentage of Individuals",
+    fill = "Gender") +
+  scale_x_discrete(labels = c())+
+  scale_fill_manual(values = c("#2166ac", "#67a9cf"), labels = c("Male", "Female"))
+
+print(Plot_gen)
+```
+
+
+43.5% the sample is men and 56.4% of the sample is women.
+
+#### Sample distribution by education
+
+```{r}
+##Sample distribution by education
+
+#Plotting the distribution 
+plot_edu <- voting_data %>%
+  select(educ) %>%
+  na.omit() %>%
+  group_by(educ = as.factor(educ)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes(x = educ, y = frequency , fill = educ)) +
+  geom_col(stat = "identity", width = 0.9, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.9),
+            vjust = -0.7, size = 3) +
+  scale_y_continuous(limits = c(0,100))+
+  labs (title = "Sample distribution by education",
+        x = "Highest level of education",
+        y = "Percentage of Individuals",
+        fill = "Highest level of education",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+  scale_x_discrete(labels = c())+
+  scale_fill_brewer(palette="PuBuGn", labels = c("Did not graduate from high school", "High school graduate", "Some college, but no degree (yet)", "2-year college degree", "4-year college degree", "Postgraduate degree"), direction = -1)
+
+print(plot_edu)
+```
+
+
+40% of the sample is at least a four-year college graduate. 15% of the respondents are postgraduates. Only 2% of the respondents did not graduate from high school.
+
+#### Sample distribution by voting behavior
+
+```{r}
+##Sample distribution by voting behavior 
+Plot_vot <- voting_data %>%
+  group_by(voted = as.factor(voted)) %>%
+  na.omit() %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes(x = voted, y = frequency , fill = voted)) +
+  geom_col(stat = "identity", width = 0.9, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.9),
+            vjust = -0.7, size = 3) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,100))+
+  labs (title = "Sample distribution by voting behvaiour",
+        x = "Voted in 2020 Election",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020",
+        fill = "Voting behavior") +
+  theme_minimal()+
+  scale_fill_manual(values = c("#2166ac", "#67a9cf"), labels = c("Voted", "Not voted"))
+
+print(Plot_vot)
+```
+
+
+99.8% of all respondents said that they voted in the 2020 elections.
+
+---
+
+### EXPLORATORY DATA ANALYSIS
+
+This section illustrates the relationship between voter turnout and predictors in our dataset.
+
+#### **Visualization 1:** Race distribution by voting behavior
+
+```{r Plot}
+#Plotting race distribution by voting behavior
+Plot_vrace <- voting_data %>%
+  select(voted, race) %>%
+  na.omit() %>%
+  group_by(voted = as.factor(voted), race = as.factor(race)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes(x = voted, y = frequency , fill = race)) +
+  geom_col(stat = "identity", width = 0.9, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits = 1)), position = position_dodge(0.9),
+            vjust = -0.5, size = 2.6) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,100))+
+  labs (title = "Race by Voting behavior",
+        x = "Voted in 2020 Election",
+        y = "Percentage of Individuals",
+        fill = "Sexuality",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+  scale_fill_brewer(palette="Set2", labels = c("White", "Black/African-American", "Hispanic/Latino", "Asian/Asian-American", "Native American","Middle Eastern", "Two or more races", "Other", "Unknown"), direction = -1)
+
+print(Plot_vrace)
+```
+
+
+76.3% of the individuals who voted are White while only 66.6% of the individuals who did not vote are White. Among those who voted, almost 9% were Black/African-American. Blacks constitute a higher percentage of those who did not vote at 14.1%. Minority communities constitute a higher proportion of the group that did not vote as compared to those who did. 
+
+#### **Visualization 2:** Age distribution by voting behavior 
+
+```{r}
+
+#Plotting age distribution by voting behavior 
+Plot_vage <- voting_data %>%
+  select(age, voted) %>%
+  na.omit() %>%
+   mutate(agegroup = case_when(age >= 18  & age <= 24 ~ '18_24',
+                                             age >= 25  & age <= 34 ~ '25_34',
+                                             age >= 35  & age <= 44 ~ '35_44',
+                                             age >= 45  & age <= 54 ~ '45_54',
+                                             age >= 55  & age <=64 ~ '55_64',
+                                             age >= 65  & age <= 74 ~ '65_74',
+                                             age >= 75  ~ '75+')) %>%
+  select(voted, agegroup) %>%
+  na.omit() %>%
+  group_by(voted = as.factor(voted), agegroup = as.factor(agegroup)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes(x = voted, y = frequency , fill = agegroup)) +
+  geom_col(stat = "identity", width = 0.9, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.9),
+            vjust = -0.5, size = 3) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,100))+
+  labs (title = "Age Group by Voting behavior",
+        x = "Voted in 2020 Election",
+        y = "Percentage of Individuals",
+        fill = "Age Group",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+  scale_fill_brewer(palette="PuBuGn", labels = c("18_24", "25_34","35_44", "45_54", "55_64", "65_74", "75+"), direction = -1)
+  
+print(Plot_vage)                      
+```
+
+
+There is a higher proportion of middle-aged individuals among the group that voted than those who didn't. Almost 16% of those who did not vote are youth in the age group of 18 to 34. Youth's disengagement with voting activities in clear in the graph. Older age groups are more likely to vote. 
+
+#### **Visualization 3:** Sexuality by voting behavior  
+
+```{r}
+#Plotting sexuality by voting behavior 
+Plot_vsex <- voting_data %>%
+  select(voted, sexuality) %>%
+  na.omit() %>%
+  group_by(voted = as.factor(voted), sexuality = as.factor(sexuality)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes(x = voted, y = frequency , fill = sexuality)) +
+  geom_col(stat = "identity", width = 0.9, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.9),
+            vjust = -0.5, size = 3) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,100))+
+  labs (title = "Sexuality by Voting behavior",
+        x = "Voted in 2020 Election",
+        y = "Percentage of Individuals",
+        fill = "Sexuality",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+  scale_fill_brewer(palette="Set2", labels = c("Heterosexual/straight", "Lesbina/Gay woman","Gay man", "Bisexual", "Other", "Prefer not to say"))
+  
+print(Plot_vsex) 
+```
+
+
+Since the LGBTQI community is not well-represented in this data set, it is hard to draw any conclusions about the correlation between sexuality and voting behavior. 
+
+#### **Visualization 4:** Employment by voting behavior 
+
+```{r}
+#Plotting employment by voting behavior 
+Plot_vemp <- voting_data %>%
+  select(voted, employ) %>%
+  na.omit() %>%
+  group_by(voted = as.factor(voted), employ = as.factor(employ)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes(x = voted, y = frequency , fill = employ)) +
+  geom_col(stat = "identity", width = 0.9, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits =1)), position = position_dodge(0.9),
+            vjust = -0.5, size = 2.8) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,100))+
+  labs (title = "Employment Status by Voting behavior",
+        x = "Voted in 2020 Election",
+        y = "Percentage of Individuals",
+        fill = "Employment status",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+  scale_fill_brewer(palette="Set3", labels = c("Working full time", "Working part time","Temporarily laid off", "Unemployed", " Retired", "Permanently disabled", "Taking care of family", "Student", "Other"), direction = -1)
+  
+print(Plot_vemp) 
+```
+
+Almost 65% of those who voted are individuals who work full time and those who are retired. Only 2.6% of those who voted were students. This underscores the poor engagement of youth with voting activities. It is expected that more unemployed individuals are likely to vote but only 6.2% of those who voted were unemployed. This number is 15.7% for the group that did not vote. 
+
+#### **Visualization 5:** Income Distribution by Voting behavior
+
+``` {r Plot5.1, fig.width = 12}
+
+## How is the income distribution among those who voted and those who didn't
+
+#Plot 1
+income_by_voted <- voting_data %>%
+  select(voted,faminc_new) %>%
+  na.omit() %>%
+  filter(voted == 1) %>%
+  filter(faminc_new != 97) %>%
+  group_by(faminc_new = as.factor(faminc_new)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count)*100)) %>%
+  ggplot() +
+  geom_col(aes(x = faminc_new, y = frequency), fill = "lightskyblue") +
+  geom_text(aes(x = faminc_new, y = frequency, label = round(frequency, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) + 
+  scale_x_discrete(labels = str_wrap(c("Less than $10,000","$10,000 - $19,999","$20,000 - $29,999","$30,000 - $39,999","$40,000 - $49,999","$50,000 - $59,999","$60,000 - $69,999","$70,000 - $79,999","$80,000 - $99,999","$100,000 - $119,999","$120,000 - $149,999","$150,000 - $199,999","$200,000 - $249,999","$250,000 - $349,999","$350,000 - $499,999","$500,000 or more"), width = 7)) +
+  labs (title = str_wrap("Income Distribution Among Individuals Who Voted"),
+        x = "Income Distribution",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal()
+
+print(income_by_voted)
+```
+
+To try to understand the pattern of income distribution among the two groups: those who voted and those who didn't.
+
+The graph above shows us the income distribution among the individuals who voted. From this we can see that individuals belong to median income levels, with a majority of the individuals concentrated in the central portion of the distribution. 
+
+``` {r Plot5.2, fig.width = 12}
+#Plot 2: income distribution amongst those who did not vote.
+income_by_notvoted <- voting_data %>%
+   select(voted,faminc_new) %>%
+  na.omit() %>%
+  filter(voted == 0) %>%
+  filter(faminc_new != 97) %>%
+  group_by(faminc_new = as.factor(faminc_new)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count)*100)) %>%
+  ggplot() +
+  geom_col(aes(x = faminc_new, y = frequency),fill = "turquoise4") +
+  geom_text(aes(x = faminc_new, y = frequency, label = round(frequency, digits = 2)), position = position_dodge(0.7),
+            vjust = -0.5, size = 3.5) +
+  scale_x_discrete(labels = str_wrap(c("1" = "Less than $10,000", "2" = "$10,000 - $19,999","3" ="$20,000 - $29,999","4" ="$30,000 - $39,999","5" ="$40,000 - $49,999","6" ="$50,000 - $59,999","7" ="$60,000 - $69,999","8" ="$70,000 - $79,999","9" ="$80,000 - $99,999","10" ="$100,000 - $119,999","11" ="$120,000 - $149,999","12" ="$150,000 - $199,999","13" ="$200,000 - $249,999","14" ="$250,000 - $349,999","15" ="$350,000 - $499,999","16" ="$500,000 or more"), width = 7)) +
+  labs (title = "Income Distribution Among Individuals Who Did Not Vote",
+        x = "Income Distribution",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal()
+
+print(income_by_notvoted)
+```
+
+In contrast to the income distribution among individuals who voted in 2020 election, the income distribution among those who did not vote is right skewed, with a majority of the individuals in the lower income category. This helps us understand the profile of those not voting, and signalling that lower income groups are likely not to vote in an election. 
+
+#### **Visualization 6:** Home Ownership by Voting behavior
+
+Having understood that on average, individuals who have voted have a higher salary and those who didn't, we can look at the pattern of home ownership to see if this trend holds true. As we would have expected, there is a higher proportion of individuals who own their own home among those who voted than who didn't (68% vs. 42%). Half of the individuals who did not vote, rent a home in our sample while this proportion is only 28% for individuals who voted.
+
+``` {r Plot6}
+#Home Ownership by Voted/Not Voted 
+
+voting_data %>%
+  select(voted, ownhome) %>%
+  na.omit() %>%
+  group_by( voted = as.factor(voted), ownhome = as.factor(ownhome)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes(x = voted, y = frequency , fill = ownhome)) +
+  geom_col(stat = "identity", width = 0.7, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.7),
+            vjust = -0.5, size = 3.5) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,80)) +
+  labs (title = "Home Ownership by Voting behavior",
+        x = "Voted in 2020 Election",
+        y = "Percentage of Individuals",
+        fill = "Home Ownership",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+  scale_fill_brewer(palette="PuBuGn", labels = c("Own", "Rent", "Other"), direction = -1)
+  
+```
+
+#### **Visualization 7:** Educational Attainment by Voting behavior
+
+``` {r Plot7, fig.width = 8 }
+voting_data %>%
+  select(voted, educ) %>%
+  na.omit() %>%
+  group_by(voted = as.factor(voted), educ = as.factor(educ)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes(x = voted, y = frequency , fill = educ)) +
+  geom_col(stat = "identity", width = 0.9, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.9),
+            vjust = -0.7, size = 3) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,75))+
+  labs (title = "Educational Attainment by Voting behavior",
+        x = "Voted in 2020 Election",
+        y = "Percentage of Individuals",
+        fill = "Educational Attainment",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+  scale_fill_brewer(palette="PuBuGn", labels = c("Did not graduate from high school", "High school graduate", "Some college, but no degree (yet)", "2-year college degree", "4-year college degree", "Postgraduate degree"), direction = -1)
+
+```
+
+Among those who did not vote, we can see that a little more one-third of the individuals are high school graduates. While comparing the educational attainment among our two groups, we can see that there is a higher proportion of individuals who have completed a 4-year degree (27% vs. 14%) and/or a post graduate degree (17% vs. 6%) among those who voted vs. those who did not. This helps us understand the profile of individuals who did not vote in the election
+
+#### **Visualization 8:** Investment in Stock Market/Mutual Funds by Voting behavior
+
+``` {r Plot8}
+voting_data %>%
+  select(voted, investor) %>%
+  na.omit() %>%
+  group_by(voted = as.factor(voted), investor = as.factor(investor)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes(x = voted, y = frequency , fill = investor)) +
+  geom_col(stat = "identity", width = 0.7, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.7),
+            vjust = -0.7, size = 3) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,100))+
+  labs (title = "Investment in Stock Market/Mutual Fund by Voting behavior",
+        x = "Voted in 2020 Election",
+        y = "Percentage of Individuals",
+        fill = "Invested in Stock Market",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+  scale_fill_manual(values = c("#006d2c", "#a63603"), labels = c("Yes", "No"))
+
+```
+
+In line with understanding the income distribution and home ownership patterns between the two groups, we also looked at whether there was any difference among these groups while making investments in the stock market. Only a quarter of the individuals who did not vote have any investment in the stock market, while 77% of the individuals who did not vote have not made any investments in these markets. Among the individuals who voted, there is almost an equal split between investing and not investing in the stock market/mutual fund. 
+
+#### **Visualization 9:** Extent of Following Government and Public Affairs
+
+``` {r Plot9}
+voting_data %>%
+  select(voted, newsint) %>%
+  na.omit() %>%
+  group_by(voted = as.factor(voted), newsint = as.factor(newsint)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes(x = voted, y = frequency , fill = newsint)) +
+  geom_col(stat = "identity", width = 0.7, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.7),
+            vjust = -0.5, size = 3) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,75))+
+  labs (title = "Extent of Following Government and Public Affairs by Voting behavior",
+        x = "Voted in 2020 Election",
+        y = "Percentage of Individuals",
+        fill = "Frequency",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+  scale_fill_brewer(palette="PuBuGn", labels = c("Most of the time", "Some of the time", "Only now and then","Hardly at all", "Don't know"), direction = -1)
+
+```
+
+63% of the individuals who voted stated that they follow government and public affairs "most of the time", while 25% of them follow "some of the time". There is a clear contrast between our two voting groups. 23% of the individuals who did not vote stated that they only follow the news every now and then, while 16% stated that hardly follow it. With  87% of the group that voted following the news atleast "some of the time", this number is only at 55% in the group that did not vote.  
+
+#### **Visualization 10:** Participation in Any Political Activity
+
+``` {r Plot10}
+voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(political_meetings = if_else(CC20_430a_1 == 2, 0, 1),
+         political_sign = if_else(CC20_430a_2 == 2, 0, 1),
+         work_campaign = if_else(CC20_430a_3 == 2, 0, 1),
+         political_protest = if_else(CC20_430a_4 == 2, 0, 1),
+         contact_public_official = if_else(CC20_430a_5 == 2, 0, 1),
+         donate_money = if_else(CC20_430a_6 == 2, 0, 1),
+         donate_blood = if_else(CC20_430a_7 == 2, 0, 1)) %>%
+  mutate(any_political = if_else(political_meetings == 1 | political_sign == 1 | work_campaign == 1 | political_protest == 1| contact_public_official == 1 | donate_money == 1 | donate_blood == 1, 1, 0 ))  %>%
+  group_by(voted) %>%
+  summarise(any_political = (mean(any_political))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = any_political, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = any_political, label = round(any_political, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,75)) +
+  labs(title = "Partipation in Any Political Activity by Voting behavior",
+       subtitle = str_wrap("Political activity includes attending political meetings, putting up a political sign, working for a campaign, participating in a political protest, contacting a public official, donating money to a campaign or donating blood",width = 100),
+        x = "Voted",
+        y = "Percentage of Individuals Who Participated",
+        caption = "Source: Harvard's Cooperative Election Study 2020") + 
+  guides(fill = "none") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "PuBuGn")
+
+```
+
+There is a higher proportion of individuals participating in a political activity among the group that voted than those who didn't. While this is expected, we also see 28% of the individuals who did not vote partipating in a political activity in the past year.
+(Political activity includes attending political meetings, putting up a political sign, working for a campaign, participating in a political protest, contacting a public official, donating money to a campaign or donating blood)
+
+Note: Participation by voting behavior for each activity is given in the appendix. 
+
+#### **Visualization 11:** Political Ideology by Voting behavior
+
+``` {r Plot11}
+voting_data %>%
+  select(voted, ideo5) %>%
+  na.omit() %>%
+  group_by(voted = as.factor(voted), ideo5 = as.factor(ideo5)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes(x = voted, y = frequency , fill = ideo5)) +
+  geom_col(stat = "identity", width = 0.9, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.9),
+            vjust = -0.7, size = 3) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  scale_y_continuous(limits = c(0,75))+
+  labs (title = "Political Ideology by Voting behavior",
+        x = "Voted in 2020 Election",
+        y = "Percentage of Individuals",
+        fill = "Political Ideology",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+  scale_fill_manual(values = c("#2166ac", "#67a9cf","#e0e0e0", "#ef8a62","#b2182b", "#ffffbf"), labels = c("Very liberal", "Liberal", "Moderate", "Conservative", "Very Conservative", "Not Sure"))
+
+```
+
+
+To understand an individual's political ideology, they were asked where they fall on the spectrum from Very Liberal to Very Conservative. 35% of the individuals who voted are liberal (Very liberal or liberal) while only 18% of the individual who did not vote are liberal. We find that 40% of the individuals who did not vote are "moderate" and not falling into either a liberal or conservative category. Among those voted, ~65% of the individuals have chosen their ideological group, while only ~45% of the individuals who did not vote have categorised themselves. 
+
+---
+
+## GEOSPATIAL ANALYSIS
+
+``` {r, results = "hide"}
+# download county shape files from tigris package
+counties_sf <- counties(cb=TRUE)
+
+# download state shape files from tigris package
+states_sf <- states(cb=TRUE)
+
+```
+
+``` {r function1}
+# create a function for plotting a variable by counties
+plot_counties_map <- function(perc_data, var_name, title, col_palette='Blues') {
+  
+  # join with counties shapefile 
+  counties_perc_data <- geo_join(counties_sf, perc_data, "GEOID", "countyfips") 
+  counties_perc_data <- counties_perc_data %>% na.omit()
+
+  # create color palette 
+  pal <- colorNumeric(col_palette, domain = counties_perc_data[[ var_name ]])
+
+  # set up the tootltip
+  popup_sb <- paste0(counties_perc_data$NAME, ", ", counties_perc_data$STATE_NAME, "</br/>", title,": \n", as.character(round(counties_perc_data[[ var_name ]]*100,1)))
+  
+  
+  # map voter_count_perc with the new tiles CartoDB.Positron
+  leaflet() %>%
+    addProviderTiles("CartoDB.Positron") %>%
+    setView(-98.483330, 38.712046, zoom = 4) %>% 
+    addPolygons(data = counties_perc_data , 
+                fillColor = ~pal(counties_perc_data[[var_name]]), 
+                fillOpacity = 1, 
+                weight = 0.9, 
+                smoothFactor = 0.5, 
+                stroke=TRUE,
+                color="white",
+                popup = ~popup_sb) %>%
+    addLegend(pal = pal, 
+              values = counties_perc_data[[var_name]], 
+              labFormat = labelFormat(suffix = '%', between = '% - ',
+                                                   transform = function(x) 100 * x),
+              position = "bottomright",
+              title = title)
+  
+}
+
+```
+
+``` {r function1.1}
+# create a function for plotting a variable by states
+plot_states_map <- function(perc_data, var_name, title, col_palette='Blues') {
+  
+  # join with states shapefile 
+  states_perc_data <- geo_join(states_sf, perc_data, "GEOID", "statefips") 
+  states_perc_data <- states_perc_data %>% na.omit()
+
+  # create color palette 
+  pal <- colorNumeric(col_palette, domain = states_perc_data[[ var_name ]])
+
+  # set up the tootltip
+  popup_sb <- paste0(states_perc_data$NAME, "</br/>", title,": \n", as.character(round(states_perc_data[[ var_name ]]*100, 1)))
+  
+  
+  # map voter_count_perc with the new tiles CartoDB.Positron
+  leaflet() %>%
+    addProviderTiles("CartoDB.Positron") %>%
+    setView(-98.483330, 38.712046, zoom = 4) %>% 
+    addPolygons(data = states_perc_data , 
+                fillColor = ~pal(states_perc_data[[var_name]]), 
+                fillOpacity = 1, 
+                weight = 0.9, 
+                smoothFactor = 0.5, 
+                stroke=TRUE,
+                color="white",
+                popup = ~popup_sb) %>%
+    addLegend(pal = pal, 
+              values = states_perc_data[[var_name]], 
+              labFormat = labelFormat(suffix = '%', between = '% - ',
+                                                   transform = function(x) 100 * x),
+              position = "bottomright",
+              title = title)
+  
+}
+```
+
+
+#### 1. Voter Turnout by State
+
+The map below shows what percentage of respondents voted (responded yes) in the 2020 election for each state.
+
+``` {r map1 }
+voter_turnout_state <- voting_data %>%
+  mutate(voted = ifelse(voted == 1,1,0)) %>%
+  mutate(statefips=sprintf("%02d", inputstate)) %>%
+  drop_na(voted) %>%
+  group_by(statefips) %>%
+  summarise(voter_count_perc = mean(voted))
+
+
+plot_states_map(voter_turnout_state, 'voter_count_perc', 'Voter Turnout %')
+
+```
+
+From this map, we wanted to understand if there is a difference between voting turnout by state, and if so by how much. As we can see from the map, voter turnout in most of the states was > 90%. Southern states had relatively lower percentage of respondents who voted, in particular Mississipi, Oklahoma, Arkansas, and Alabama. 
+
+
+#### 2. Conservative Ideology by State
+
+To calculate the number of respondents with conservative ideology, we looked at the variable `ideo5` which corresponds to the question: "In general, how would you describe your own political viewpoint?". Responses "Very Conservative" and "Conservative" were counted for this analysis.
+
+```{r map2}
+cons_perc_state <- voting_data %>%
+  mutate(conservative = ifelse(ideo5 %in% c(4,5),1,0)) %>%
+  mutate(statefips=sprintf("%02d", inputstate)) %>%
+  drop_na(conservative) %>%
+  group_by(statefips) %>%
+  summarise(cons_count_perc = mean(conservative))
+
+plot_states_map(cons_perc_state, 'cons_count_perc', 'Conservative Respondents %', 'Reds')
+
+```
+
+With this map, we want to understand which states had highest or lowest respondents with conservative ideology in order to understand the respondents better, and also to understand if the findings here match our hypothesis about Blue and Red States. As we can see from the plot, Wyoming, South Dakota, North Dakota, and Tennessee had highest percentage of respondents who had a conservative viewpoint. We can also see that mid western and southern states generally have more conservative leaning respondents than states like Massachusetts, California, New York, and Vermont where this percentage is less than 25%.  
+
+
+#### 3. Conservative Ideology by County
+
+```{r map3}
+cons_perc_county <- voting_data %>%
+  mutate(conservative = ifelse(ideo5 %in% c(4,5),1,0)) %>%
+  drop_na(ideo5) %>%
+  group_by(countyfips) %>%
+  summarise(cons_count_perc = mean(conservative))
+
+plot_counties_map(cons_perc_county, 'cons_count_perc', 'Conservative Respondents %', 'Reds')
+
+```
+
+
+#### 4. Gun Ownership by State
+
+To calculate Gun Ownership, we look at the variable `gunown` which corresponds to the question: "Do you or does anyone in your household own a gun?". We choose the responses "Personally own a gun" and "Don't personally own a gun, but someone in the household owns a gun" as relevant for this analysis.
+
+
+``` {r map4}
+gun_perc_state <- voting_data %>%
+  mutate(gunownership = ifelse(gunown %in% c(1,2),1,0)) %>%
+  mutate(statefips=sprintf("%02d", inputstate)) %>%
+  drop_na(gunownership) %>%
+  group_by(statefips) %>%
+  summarise(gun_count_perc = mean(gunownership))
+
+plot_states_map(gun_perc_state, 'gun_count_perc', 'Gun Ownership %', 'YlOrRd')
+
+
+```
+
+
+Gun ownership % is highest in West Virginia (53%), closely followed by Wyomoing, Montana, and Alabama. On the other hand, Massachusetts, New York, New Jersey, DC, Conneticut have relatively low gun ownership percentage (less than 20%). We also observe that there might be some correlation with previous analysis, where more conservative states also have higher gun ownership percentage.
+
+### States with maximum and minimum gun ownership
+
+```{r echo=FALSE}
+
+#states_gun_perc %>%
+#  slice_max(gun_count_perc) ## West Virginia has the highest percentage of respondents with gun ownership
+
+#states_gun_perc %>%
+#  slice_min(gun_count_perc) ## District of Columbia has the lowest percentage of respondents with gun ownership
+
+```
+
+#### 5. Comparing High and Low Gun Ownership States
+
+Next, we wanted to compare West Virginia (53% respondents with gun ownership), and Massachusetts (13% respondents with gun ownership) in context of safety. We look at the variable `police_unsafe` which corresponds to the survey question "Do the police make you feel...?". Here we classify options "Somewhat Unsafe"  and "Mostly Unsafe" as "unsafe" category and count the number of respondents who chose these 2 options.
+
+```{r map5}
+police_unsafe_county <- voting_data %>%
+    mutate(police_unsafe = ifelse(CC20_307 %in% c(3,4),1,0)) %>%
+    group_by(countyfips) %>%
+    summarise(police_unsafe_perc = mean(police_unsafe))
+
+counties_police_unsafe_perc <- geo_join(counties_sf, police_unsafe_county , "GEOID", "countyfips")
+counties_police_unsafe_perc <- subset(counties_police_unsafe_perc, !is.na(police_unsafe_perc))
+
+# filter for west virginia
+wv_police_unsafe_perc <- counties_police_unsafe_perc %>%
+  filter(STATEFP == "54")
+
+# filter for MA
+ma_police_unsafe_perc <- counties_police_unsafe_perc %>%
+  filter(STATEFP == "25")
+```
+
+
+#### 5.1 West Virginia v/s Massachusetts (Counties)
+
+The counties-level maps for West Virginia and Massachusetts shows percentage of respondents that said police makes them feel "unsafe". 
+
+
+```{r}
+
+# create tooltip : State: Unsafe %
+wv_police_unsafe_perc$tooltip <- paste0(wv_police_unsafe_perc$NAME,
+                                 ": ",
+                                 round(wv_police_unsafe_perc$police_unsafe_perc*100, 2), '%')
+
+# Interactive geom_sf to plot Percentage of respondents that said police makes them unsafe in West Virginia
+wv_police_unsafe_perc_plot <- ggplot() +
+  geom_sf_interactive(data = wv_police_unsafe_perc, color = "white", aes(fill = police_unsafe_perc, 
+                      tooltip = tooltip, data_id = GEOID), size = 0.5) +
+  labs(title = "Percentage of Respondents that said police makes them feel unsafe",
+       subtitle = "In West Virginia",
+       caption = "Source: Harvard's Cooperative Election Study 2020",
+       fill = "Percentage of responsents") +
+  theme(legend.position = "right") +
+   scale_fill_gradient(low = "#56B1F7", high = "#132B43", labels = scales::percent, limits = c(0,1)) +
+  theme_void()
+
+# Add hover color
+wv_police_unsafe_perc_plot <- girafe(ggobj = wv_police_unsafe_perc_plot) %>%
+  girafe_options(opts_hover(css = "fill:cyan;"), 
+                 opts_zoom(max = 10))
+
+wv_police_unsafe_perc_plot
+
+# Interactive geom_sf to plot Percentage of respondents that said police makes them unsafe in Massachusetts
+ma_police_unsafe_perc$tooltip <- paste0(ma_police_unsafe_perc$NAME,
+                                 ": ",
+                                 round(ma_police_unsafe_perc$police_unsafe_perc*100, 2), '%')
+
+ma_police_unsafe_perc_plot <- ggplot() +
+  geom_sf_interactive(data = ma_police_unsafe_perc, color = "white", aes(fill = police_unsafe_perc, 
+                      tooltip = tooltip, data_id = GEOID), size = 0.5) +
+  labs(title = "Percentage of Respondents that said police makes them feel unsafe",
+       subtitle = "In Massachusets",
+       caption = "Source: Harvard's Cooperative Election Study 2020",
+       fill = "Percentage of responsents") +
+  theme(legend.position = "right") +
+   scale_fill_gradient(low = "#56B1F7", high = "#132B43", labels = scales::percent, limits = c(0,1)) +
+  theme_void()
+
+# Add hover color
+ma_police_unsafe_perc_plot <- girafe(ggobj = ma_police_unsafe_perc_plot) %>%
+  girafe_options(opts_hover(css = "fill:cyan;"), 
+                 opts_zoom(max = 10))
+
+ma_police_unsafe_perc_plot 
+
+```
+
+#### 6. Exploring Voter Turnout in 2016 elections. 
+
+People who voted for Donald Trump in 2016 but not in 2020
+
+``` {r}
+switch_perc_state <- voting_data %>%
+  mutate(switch = ifelse(presvote16post == 2 & CC20_364a != 1,1,0)) %>%
+  mutate(statefips=sprintf("%02d", inputstate)) %>%
+  drop_na(switch) %>%
+  group_by(statefips) %>%
+  summarise(switch_perc = mean(switch))
+
+plot_states_map(switch_perc_state, 'switch_perc', '% Respondents who switched <br/> from Donald Trump (2016 -> 2020)')
+
+```
+
+We know that Donald Trump did not get re-elected in 2020. The survey can help us understand which states or counties had high percentage of respondents who voted for Donald Trump in 2016 (option 2 of variable `presvote16post`) but did not vote for Donald Trump in 2020 (option 1 of variable `CC20_364a`). 
+The map below shows the % of respondents who had this switch in their vote. We can see from the map that Wyoming, Delaware, and Kentucky had highest % of respondents (around 2%) who voted for Donald Trump in 2016 but not in 2020. The Republican votes in these states were also lower in 2020 election than in 2016. 
+
+---
+
+## MACHINE LEARNING
+
+To predict whether an individual voted in the 2020 presidential elections, we built three different models: decision trees, logistic regression and random forest. The outcome variable - voted - was coded as 0 if an individual did not vote, and 1 if an individual voted. Our analysis only includes voters that are registered to vote and observations with missing predictor values were dropped from the analysis. 
+
+The data was split into two sections - training and testing - 80 percent of the data was assigned to training, and the remainder was assigned to testing. We performed 10-fold cross validation to improve model performance. Preprocessing involved dropping all predictors with near zero variance, dummy encoding all categorical predictors and downsampling to reduce class imbalance.
+
+Precision - how often a classifier is correct when predicting events - is the relevant outcome metric in this study. In the context of election polling, our objective is to accurately identify likely voters using individual characteristics or attitudes and improve polling accuracy. False positive - a situation where the model predicts that an individual voted, when in fact, they did not can be costly and generate inaccurate predictions for likely voters. We seek to reduce the false positive rates and improve model precision.
+
+```{r library load data and recode variables}
+# load the data
+voting_data_ml <- read_csv("data/voting_data.csv") %>%
+  select(CC20_401, birthyr, gender, educ, race, CC20_332a, CC20_302, CC20_309e, CC20_350b, urbancity, ideo5, pew_religimp, ownhome, newsint, faminc_new, investor, internethome, sexuality, CC20_331e, gunown, child18, votereg, CC20_307, CC20_303, employ, marstat, immstat, union, phone, presvote16post, inputstate, dualcit, region, healthins_1, healthins_2, healthins_3, healthins_4, healthins_5, healthins_6, CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7, CC20_430a_8, numchildren, dualcit, CC20_300_1, CC20_300_2, CC20_300_3, CC20_300_4, CC20_300_5) %>%
+  rename(campaigndonation = CC20_430a_6)
+
+# filter registered voters and drop missing values
+voting_data_ml <- voting_data_ml %>%
+  filter(votereg == 1) %>%
+  mutate(age = 2020 - birthyr) %>%
+  select(-birthyr) %>%
+  na.omit()
+
+# create a binary variable for voted or not and convert to factor
+voting_data_ml <- voting_data_ml %>% 
+    mutate(voted = if_else(condition = CC20_401 == 5, true = 1,
+                               false = 0))%>%
+  mutate(voted = factor(voted, labels = c("1", "0"), levels = c("1", "0")))
+
+# drop voter registration (since it is a prerequisite, not a predictor)
+voting_data_ml <- voting_data_ml %>% 
+  select(-votereg)
+```
+
+```{r - split data in testing and training}
+set.seed(201902)
+voting_split <- initial_split(data = voting_data_ml, prop = 0.8, strata = voted)
+voting_train <- training(x = voting_split) 
+voting_test <- testing(x = voting_split)
+
+#use v-fold cross validation
+folds_voting <- vfold_cv(voting_train, v = 10)
+```
+
+```{r - create recipe and preprocessing}
+voting_rec <-
+  recipe(voted ~ ., data = voting_train) %>%
+  step_nzv(all_predictors()) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  themis::step_downsample(voted)
+```
+
+The first model involves the use of decision trees with hyperparameter tuning. We tune two hyperparameters:  cost complexity and tree depth. As we show below, the best performing model has a precision of 0.983.
+
+```{r decision tree with hyper parameter tuning: algorithm #1}
+
+# tune hyper parameters
+tree_tune_voting <-
+  decision_tree(
+    cost_complexity = tune(),
+    tree_depth = tune()
+  ) %>%
+  set_engine("rpart") %>%
+  set_mode("classification")
+
+# create a grid
+tree_grid_voting <- grid_regular(cost_complexity(),
+                                 tree_depth(),
+                                 levels = 5)
+
+# create workflow
+tree_wf_voting <- workflow() %>%
+  add_recipe(voting_rec) %>%
+  add_model(tree_tune_voting)
+
+# estimate model with resampling
+tree_res_voting <- tree_wf_voting %>%
+  tune_grid(
+    resamples = folds_voting,
+    grid = tree_grid_voting, metrics = metric_set(accuracy, roc_auc, precision))
+
+# view accuracy, roc and precision
+tree_res_voting %>%
+  collect_metrics(summarize = FALSE)
+
+# show model with highest precision
+tree_res_voting %>%
+  show_best(metric = "precision", n = 1)
+
+# select a single set of hyper parameters for the best decision tree
+best_tree_voting <- tree_res_voting %>%
+  select_best(metric = "precision")
+
+# finalize the model
+final_tree_wf_voting <- tree_wf_voting %>%
+  finalize_workflow(best_tree_voting)
+
+# last fit
+tree_final_fit_voting <- final_tree_wf_voting %>%
+  fit(data = voting_train)
+```
+
+```{r - plot 10 resamples for decision tree}
+#plot RMSE across 10 resamples for decision tree
+tree_res_voting  %>%
+  collect_metrics() %>%
+  filter(.metric == "precision") %>%
+  mutate(tree_depth = factor(tree_depth)) %>%
+  ggplot(aes(cost_complexity, mean, color = tree_depth)) +
+  geom_line(size = 1.5, alpha = 0.6) +
+  geom_point(size = 2) +
+  facet_wrap(~ .metric, scales = "free", nrow = 2) +
+  scale_x_log10(labels = scales::label_number()) 
+```
+
+The second model is a simple logistic regression with "voted" as the dependent variable. The best model has a precision of 0.986.
+
+```{r logistic regression: algorithm #2}
+# build a model
+logistic_mod_voting <-
+  logistic_reg() %>%
+  set_engine("glm")
+
+# create a workflow
+logistic_wf_voting <-
+  workflow() %>%
+  add_model(logistic_mod_voting) %>%
+  add_recipe(voting_rec)
+
+# use resampling
+logistic_res_voting <- 
+  logistic_wf_voting %>%
+  fit_resamples(folds_voting, metrics = metric_set(accuracy, roc_auc, precision))
+
+# view accuracy, roc and precision
+logistic_res_voting %>%
+  collect_metrics(summarize = FALSE)
+
+# show the model with the highest precision
+logistic_res_voting %>%
+  show_best(metric = "precision", n = 1)
+
+# select the best model
+best_logistic_voting <- logistic_res_voting %>%
+  select_best("precision")
+
+# finalize the workflow
+final_logistic_wf_voting <- logistic_wf_voting  %>%
+  finalize_workflow(best_logistic_voting)
+
+# fit the data
+logistic_fit_voting <-
+  final_logistic_wf_voting %>%
+  fit(data = voting_train)
+```
+
+```{r - plot 10 resamples for logistic regression}
+#plot RMSE across 10 resamples for linear regression
+collect_metrics(logistic_res_voting, summarize = FALSE) %>%
+  filter(.metric == "precision") %>%
+  ggplot(aes(id, .estimate, group = .estimator)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal()
+```
+
+The final algorithm involves creating a random forest model. As we show below, the best performing model has a precision of .988
+
+```{r random forest: algorithm #3}
+#create a model
+rf_mod_voting <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("classification")
+
+#create a workflow
+rf_wf_voting <-
+  workflow() %>%
+  add_model(rf_mod_voting) %>%
+  add_recipe(voting_rec)
+
+#tune the model
+rf_fit_rs_voting <-
+  rf_wf_voting %>%
+  fit_resamples(folds_voting, metrics = metric_set(accuracy, roc_auc, precision))
+
+#view the accuracy, roc and precision
+rf_fit_rs_voting %>%
+  collect_metrics(summarize = FALSE)
+
+#show the best model
+rf_fit_rs_voting %>%
+  show_best(metric = "precision")
+
+#select the best model
+rf_best_voting <-
+  rf_fit_rs_voting %>%
+  select_best("precision")
+
+#finalize the workflow
+final_rf_wf_voting <- rf_wf_voting %>%
+  finalize_workflow(rf_best_voting)
+
+#fit to training data
+final_fit_rf_voting <- final_rf_wf_voting %>%
+  fit(data = voting_train)
+```
+
+```{r - plot 10 resamples for random forest}
+collect_metrics(rf_fit_rs_voting, summarize = FALSE) %>%
+  filter(.metric == "precision") %>%
+  ggplot(aes(id, .estimate, group = .estimator)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal()
+```
+
+We now identify the model with the highest precision.
+
+```{r - show the highest precision models}
+bind_rows(
+  `Decision Tree` = show_best(tree_res_voting, metric = "precision", n = 1),
+  `Logistic Regression` = show_best(logistic_res_voting, metric = "precision", n = 1),
+  `Random Forest` = show_best(rf_fit_rs_voting, metric = "precision",n = 1),
+  .id = "model"
+)
+```
+
+Since the random forest model has the highest precision, it will be implemented on the testing data. We also calculate the precision on the testing data below, and find that it is 0.99.
+
+```{r - make preductions on testing data using "best model" part 4}
+# The random forest model has the highest precision - hence, it is the "best model."
+
+predictions_test <-
+  bind_cols(
+    voting_test,
+    predict(object = final_fit_rf_voting, new_data = voting_test)
+  )
+
+#calculate precision on testing data
+precision(data = predictions_test, truth = voted, estimate = .pred_class)
+```
+
+We have identified the  top ten top predictors for voting in the 2020 elections. The candidate an individual voted for in 2016 - presvote16post- was the most important predictor for whether an individual voted in the 2020 elections. As expected, demographic variables such as age and education are important predictors. Another important predictor is how frequently an individual follows the news - newsint. Family income, employment status and state were also important predictors. Finally, whether an individual owns a home, invests in stocks, donated money to a campaign were important predictors of voting in the 2020 elections.
+
+```{r identify most important features}
+final_fit_rf_voting %>% 
+  extract_fit_parsnip() %>% 
+  vip(num_features = 10)
+```
+
+Below is an illustration of our most important predictor with our outcome variable. We can see that 43.75% of those individuals that voted for Hillary Clinton in the last election voted in the 2020 election. Similarly, 33.91% of those individuals who voted for Trump also voted in 2020 cycle. 58.38% of those who did not vote in the last cycle, did not vote in the 2020 cycle either.
+
+```{r 2016election}
+voting_data %>%
+  select(presvote16post, voted) %>%
+  na.omit() %>%
+  group_by(voted = as.factor(voted), presvote16post = as.factor(presvote16post)) %>%
+  summarise(count =  n()) %>%
+  mutate(frequency = (count/sum(count))*100) %>%
+  ggplot(aes(x = presvote16post, y = frequency , fill = voted)) +
+  geom_col(stat = "identity", width = 0.9, position = "dodge") + 
+  geom_text(aes(label = round(frequency, digits = 2)), position = position_dodge(0.9),
+            vjust = -0.7, size = 3) +
+  scale_x_discrete(labels = str_wrap(c("Hillary Clinton", "Donald Trump", "Gary Johnson", "Jill Stein", "Evan McMullin", "Other", "Did Not Vote in 2016"), width = 8)) +
+  scale_y_continuous(limits = c(0,75))+
+  labs (title = "Voting behavior by President Voted for in 2016",
+        x = "President Voted for in 2016",
+        y = "Percentage of Individuals",
+        fill = "Voted in 2020",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+ scale_fill_manual(values = c("#006d2c", "#a63603"), labels = c("Voted", "Not Voted"))
+ 
+```
+
+---
+
+## CONCLUSION
+
+While our model has a high precision on both the testing and training data, we could further improve our model by adding additional predictors such as length of voter registration, party affiliation, competitiveness of elections that the Harvard CES study does not currently have data on. The model performance could be further improved by tuning the hyperparameters for the random forest and exploring other types of regressions, such as lasso and elastic net. Furthermore, the usefulness of this model can be tested by implementing it on other election data that has identical predictors.
+
+---
+
+## REFERENCES
+
++ American National Election Studies. 2021. ANES 2020 Time Series Study Full Release [dataset and documentation]. July 19, 2021 version. www.electionstudies.org
+
++ Cohn, Nate. ‘A 2016 Review: Why Key State Polls Were Wrong About Trump’. The New York Times, 31 May 2017. NYTimes.com, https://www.nytimes.com/2017/05/31/upshot/a-2016-review-why-key-state-polls-were-wrong-about-trump.html.
+
++ Keeter, Scott. ‘Q&A: A Conversation about U.S. Election Polling Problems in 2020’. Pew Research Center, https://www.pewresearch.org/fact-tank/2021/07/21/a-conversation-about-u-s-election-polling-problems-in-2020/.
+Accessed 6 May 2022
+
++ Korte, Gregory. ‘“Shy Trump Voters” Re-Emerge as Explanation for Pollsters’ Miss’. BQ Prime, https://www.bqprime.com/politics/-shy-trump-voters-re-emerge-as-explanation-for-pollsters-miss. Accessed 6 May 2022.
+
++ Mercer, Andrew, et al. ‘Why 2016 Election Polls Missed Their Mark’. Pew Research Center, https://www.pewresearch.org/fact-tank/2016/11/09/why-2016-election-polls-missed-their-mark/. Accessed 6 May 2022. 
+
++ NW, 1615 L. St, et al. ‘Can Likely Voter Models Be Improved?’ Pew Research Center Methods, 7 Jan. 2016, https://www.pewresearch.org/methods/2016/01/07/can-likely-voter-models-be-improved/.
+
++ Schaffner, Brian; Ansolabehere, Stephen; Luks, Sam, 2021, "Cooperative Election Study Common Content, 2020", https://doi.org/10.7910/DVN/E9N6PH, Harvard Dataverse, V4; CCES Guide 2020.pdf
+
+---
+
+## APPENDIX
+
+#### Participation in a Political Activity by Voting behavior 
+
+``` {r Appendix}
+## Taking part in a political activity 
+
+plot_1 <- voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(political_meetings = if_else(CC20_430a_1 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(political_meetings = (mean(political_meetings))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = political_meetings, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = political_meetings, label = round(political_meetings, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_y_continuous(limits = c(0,50)) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  guides(fill = "none") +
+  labs(title = "Political Meetings",
+        x = "Voted",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+   scale_fill_brewer(palette = "PuBuGn")
+
+
+plot_2 <- 
+  voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(political_sign = if_else(CC20_430a_2 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(political_sign = (mean(political_sign))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = political_sign, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = political_sign, label = round(political_sign, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_y_continuous(limits = c(0,50)) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  guides(fill = "none") +
+  labs(title = "Putting Up a Political Sign",
+        x = "Voted",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+   scale_fill_brewer(palette = "PuBuGn")
+
+plot_3 <- 
+  voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(work_campaign = if_else(CC20_430a_3 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(work_campaign = (mean(work_campaign))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = work_campaign, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = work_campaign, label = round(work_campaign, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_y_continuous(limits = c(0,50)) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  guides(fill = "none") +
+  labs(title = "Working in a Campaign",
+        x = "Voted",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+   scale_fill_brewer(palette = "PuBuGn")
+
+plot_4 <- 
+  voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(political_protest = if_else(CC20_430a_4 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(political_protest = (mean(political_protest))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = political_protest, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = political_protest, label = round(political_protest, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_y_continuous(limits = c(0,50)) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  guides(fill = "none") +
+  labs(title = "Participating in a Political Protest",
+        x = "Voted",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+   scale_fill_brewer(palette = "PuBuGn")
+
+plot_5 <- 
+  voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(contact_public_official = if_else(CC20_430a_5 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(contact_public_official = (mean(contact_public_official))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = contact_public_official, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = contact_public_official, label = round(contact_public_official, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_y_continuous(limits = c(0,50)) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  guides(fill = "none") +
+  labs(title = "Contacting a Public Official",
+        x = "Voted",
+        y = "Percentage of Individuals") +
+  theme_minimal() +
+   scale_fill_brewer(palette = "PuBuGn")
+
+plot_6 <- 
+  voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(donate_money = if_else(CC20_430a_6 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(donate_money = (mean(donate_money))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = donate_money, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = donate_money, label = round(donate_money, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_y_continuous(limits = c(0,50)) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  guides(fill = "none") +
+  labs(title = str_wrap("Donated Money to a Political Organisation", width = 25),
+        x = "Voted",
+        y = "Percentage of Individuals") +
+  theme_minimal() +
+   scale_fill_brewer(palette = "PuBuGn")
+
+plot_7 <- 
+  voting_data %>%
+  select(voted,CC20_430a_1, CC20_430a_2, CC20_430a_3, CC20_430a_4, CC20_430a_5, CC20_430a_6, CC20_430a_7) %>%
+  na.omit() %>%
+  mutate(donate_blood = if_else(CC20_430a_7 == 2, 0, 1)) %>%
+  group_by(voted = as.factor(voted)) %>%
+  summarise(donate_blood = (mean(donate_blood))*100) %>%
+  ggplot() +
+  geom_col(aes(x = voted, y = donate_blood, fill = as.factor(voted))) +
+  geom_text(aes(x = voted, y = donate_blood, label = round(donate_blood, digits = 2)), position = position_dodge(0.7),vjust = -0.5, size = 3.5) +
+  scale_y_continuous(limits = c(0,50)) +
+  scale_x_discrete(labels = c("Voted", "Not Voted")) +
+  guides(fill = "none") +
+  labs(title = "Donating Blood",
+        x = "Voted",
+        y = "Percentage of Individuals",
+        caption = "Source: Harvard's Cooperative Election Study 2020") +
+  theme_minimal() +
+   scale_fill_brewer(palette = "PuBuGn")
+
+plot_1 + plot_2 + plot_3 + plot_4 
+plot_5 + plot_6 + plot_7
+```
+
