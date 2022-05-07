@@ -28,8 +28,8 @@ The CES Common Content has five parts - sample identifiers, profile questions, p
 ## Description of files:
 A  brief description of the files/directories in the repository    
 * The README.md file provides a brief overview of the objective of the project and a brief description of the files/directories in the repository
-* The voting_final.Rmd file contains seperated code chunks to perform data cleaning and analysis
-* The voting_final.html file contains the knitted output of the proect
+* The index.Rmd file contains seperated code chunks to perform data cleaning and analysis
+* The index.html file contains the knitted output of the proect
 * The gitignore file contains all the data that was used for the project
 
 ## Instructions to replicate analysis: 
