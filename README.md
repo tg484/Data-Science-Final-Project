@@ -4,7 +4,7 @@
 
 URL of the repository: https://github.com/tg484/Data-Science-Final-Project
 
-Project Website:
+Project Website: https://tg484.github.io/Data-Science-Final-Project/
 
 **Authors:**<br/>
 Priyasha Chawla<br/>
